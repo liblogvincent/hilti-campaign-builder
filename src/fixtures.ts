@@ -1,0 +1,476 @@
+import type {
+  RegistryArtifact,
+  CampaignRun,
+  EvalPoint,
+  SkillProposal,
+  CampaignTemplate,
+  DeloitteBaseline,
+  PainAreaRollup,
+  CompoundingPoint,
+} from "./types";
+import { CONTENT_BUNDLE_CAMP_04 } from "./lib/contentFixtures";
+
+export const registry: RegistryArtifact[] = [
+  {
+    id: "art_brandvoice_v2",
+    name: "Hilti Brand Voice Guidelines",
+    type: "Guideline",
+    version: 2,
+    scope: "Global",
+    status: "Approved",
+    provenance: "human_authored",
+    body: "Confident, expert tone. Avoid hype words. Lead with the jobsite problem, then the Hilti solution.",
+  },
+  {
+    id: "art_utm_v1",
+    name: "UTM Naming Convention",
+    type: "Rule",
+    version: 1,
+    scope: "Global",
+    status: "Approved",
+    provenance: "human_authored",
+    body: "Lowercase, underscore-separated. Required: utm_source, utm_medium, utm_campaign. Max 64 chars.",
+  },
+  {
+    id: "art_b2b_linkedin_v3",
+    name: "B2B LinkedIn Channel Mix",
+    type: "Playbook",
+    version: 3,
+    scope: "Global",
+    status: "Approved",
+    provenance: "human_authored",
+    body: "B2B contractor: LinkedIn over Meta 3:1. Headline: [benefit] + [product class]. Bid competitor + problem keywords. CTR 4% benchmark.",
+  },
+  {
+    id: "art_eu_compliance_v1",
+    name: "EU Market Compliance Rules",
+    type: "Rule",
+    version: 1,
+    scope: "Market",
+    status: "Approved",
+    provenance: "human_authored",
+    body: "EU content: legal imprint, GDPR consent, regional contact. EUR pricing with VAT. Right of withdrawal for B2C.",
+  },
+  {
+    id: "art_contractor_example_v2",
+    name: "Contractor Segment Patterns",
+    type: "Example",
+    version: 2,
+    scope: "Market",
+    status: "Approved",
+    provenance: "ai_proposed",
+    promoted_from: "camp_03",
+    body: "Promoted from Q3 campaign (quality 0.94). Benefit-led hook: 'Drive 2x faster. The SIW 6AT, engineered for the jobsite.' Structure: problem → solution → spec proof → CTA.",
+  },
+  {
+    id: "art_variant_ceiling_v1",
+    name: "B2B Variant Ceiling Rule",
+    type: "Playbook",
+    version: 1,
+    scope: "Channel",
+    status: "Approved",
+    provenance: "ai_proposed",
+    promoted_from: "camp_03",
+    body: "For B2B paid social, 2 variants per segment outperform 3+. Reduce to 2 unless A/B testing a new audience.",
+  },
+];
+
+export const proposals: SkillProposal[] = [
+  {
+    id: "prop_dach_hook",
+    name: "DACH Contractor Benefit Hook",
+    type: "Example",
+    scope: "Market",
+    confidence: 0.87,
+    derived_from: "camp_04, Content node",
+    affects: "3 active EU campaigns",
+    pattern: "Benefit-led hooks with spec-proof structure outperform generic by ~18% CTR.",
+    body: "DACH contractor exemplar: open with a quantified jobsite benefit ('Drive 30% faster'), follow with a single proof spec, close with a 2-word CTA. Tested on 3 variants in camp_04 QA review.",
+    impact: { cost_delta_usd: -3.0, quality_delta: 0.05 },
+    status: "Proposed",
+  },
+  {
+    id: "prop_budget_floor",
+    name: "B2B Budget Floor",
+    type: "Rule",
+    scope: "Channel",
+    confidence: 0.81,
+    derived_from: "Q1+Q2 cost data",
+    affects: "2 active campaigns",
+    pattern: "Budget <€25K → CPA underperforms.",
+    body: "For B2B paid-search, minimum campaign budget is €25,000 over the standard 6-week window. Below floor, CPA exceeds benchmark by >40%.",
+    warning: "Small sample (n=2). Needs more data before global enforcement.",
+    impact: { cost_delta_usd: -1.5, quality_delta: 0.02 },
+    status: "Proposed",
+  },
+];
+
+export const templates: CampaignTemplate[] = [
+  {
+    id: "paid-media-launch-v1",
+    label: "Paid-Media Launch",
+    gates: ["H1", "H2", "H3", "H4"],
+    sla_per_gate_hours: { H1: 24, H2: 18, H3: 8, H4: 48 },
+    available: true,
+  },
+  {
+    id: "product-launch-v1",
+    label: "Product Launch",
+    gates: ["H1", "H2", "H3", "H4"],
+    sla_per_gate_hours: { H1: 48, H2: 24, H3: 12, H4: 72 },
+    available: false,
+  },
+  {
+    id: "regional-rollout-v1",
+    label: "Regional Roll-out",
+    gates: ["H1", "H2", "H3", "H4"],
+    sla_per_gate_hours: { H1: 24, H2: 18, H3: 8, H4: 48 },
+    available: false,
+  },
+];
+
+const SLAS = templates[0].sla_per_gate_hours;
+
+export const campaigns: CampaignRun[] = [
+  {
+    id: "camp_01",
+    name: "Q1 Anchors Launch — Specifier Segment",
+    market: "EU",
+    status: "Published",
+    total_cost_usd: 52.0,
+    skill_count: 1,
+    skill_gaps: 2,
+    template_id: "paid-media-launch-v1",
+    template_label: "Paid-Media Launch",
+    sla_per_gate_hours: SLAS,
+    nodes: [],
+  },
+  {
+    id: "camp_02",
+    name: "Q2 Measuring Tools Push — Specifier Segment",
+    market: "EU",
+    status: "Published",
+    total_cost_usd: 40.0,
+    skill_count: 2,
+    skill_gaps: 1,
+    template_id: "paid-media-launch-v1",
+    template_label: "Paid-Media Launch",
+    sla_per_gate_hours: SLAS,
+    nodes: [],
+  },
+  {
+    id: "camp_03",
+    name: "Q3 Cordless Range Launch — Contractor Segment",
+    market: "EU",
+    status: "Published",
+    total_cost_usd: 33.0,
+    skill_count: 3,
+    skill_gaps: 0,
+    template_id: "paid-media-launch-v1",
+    template_label: "Paid-Media Launch",
+    sla_per_gate_hours: SLAS,
+    nodes: [
+      mkAgent("brief", "Brief", [], 2.2, ["art_brandvoice_v2"], "done", { conf: 0.92, dur: 8400, tokens: 2100 }),
+      mkGate("h1", "H1 — Brief Approval", "H1", ["brief"], "done", {
+        gate: "H1",
+        verdict: "approved",
+        reviewer: "Sarah Chen",
+        note: "Approved.",
+        decided_at: "2026-03-12T10:00:00Z",
+      }),
+      mkAgent("strategy", "Strategy Plan", ["h1"], 9.8, ["art_b2b_linkedin_v3", "art_utm_v1"], "done", { conf: 0.88, dur: 22000, tokens: 9200 }),
+      mkAgent("content", "Content Gen", ["strategy"], 14.0, ["art_brandvoice_v2", "art_utm_v1"], "done", { conf: 0.83, dur: 31000, tokens: 14400 }),
+      mkTool("qa", "QA Check", ["content"], "done"),
+      mkGate("h2", "H2 — Content Review", "H2", ["qa"], "done", {
+        gate: "H2", verdict: "approved", reviewer: "Brand Lead", note: "OK.", decided_at: "2026-03-20T10:00:00Z",
+      }),
+      mkTool("rollout", "Roll-out", ["h2"], "done", 3.5),
+      mkGate("h3", "H3 — Publish Gate", "H3", ["rollout"], "done", {
+        gate: "H3", verdict: "approved", reviewer: "Brand Lead", note: "OK.", decided_at: "2026-03-22T10:00:00Z",
+      }),
+      mkAgent("learn", "Learn & Improve", ["h3"], 3.5, [], "done", { conf: 0.79, dur: 14000, tokens: 4800 }),
+    ],
+  },
+  buildCamp04(),
+];
+
+function buildCamp04(): CampaignRun {
+  return {
+    id: "camp_04",
+    name: "Q4 Power Tool Launch — Professional Contractor Segment",
+    market: "EU",
+    status: "In Progress",
+    total_cost_usd: 0,
+    projected_cost_usd: 29.0,
+    skill_count: 4,
+    skill_gaps: 0,
+    template_id: "paid-media-launch-v1",
+    template_label: "Paid-Media Launch",
+    sla_per_gate_hours: SLAS,
+    nodes: [
+      {
+        id: "brief",
+        label: "Brief",
+        kind: "agent",
+        status: "waiting",
+        depends_on: [],
+        task_id: "task_brief_04",
+        confidence: 0.91,
+        cost_tokens: 2400,
+        duration_ms: 8200,
+        needs_human: false,
+        resolved_skill_versions: [{ id: "art_brandvoice_v2", version: 2 }],
+        output: {
+          output_ref: "blob:brief_04",
+          summary: "Structured brief: Q4 Power Tool Launch targeting EU professional contractors. Channels: LinkedIn, Google, Meta, Email, HOL. Budget: €35,000.",
+          cost_usd: 2.4,
+          resolved_skills: ["art_brandvoice_v2"],
+          skills_available_not_used: ["art_utm_v1"],
+          payload: null,
+        },
+      },
+      {
+        id: "h1",
+        label: "H1 — Brief Approval",
+        kind: "gate",
+        gate: "H1",
+        status: "waiting",
+        depends_on: ["brief"],
+        decision: null,
+      },
+      {
+        id: "strategy",
+        label: "Strategy Plan",
+        kind: "agent",
+        status: "waiting",
+        depends_on: ["h1"],
+        task_id: "task_strategy_04",
+        confidence: 0.86,
+        cost_tokens: 9400,
+        duration_ms: 22500,
+        needs_human: false,
+        decision_note: {
+          decided: "3 variants × 3 channels (LinkedIn, Google, Meta)",
+          options_considered: ["2 variants", "3 variants", "4 variants"],
+          justification:
+            "B2B Variant Ceiling Rule v1 (Playbook) says 2–3 variants outperform 4+ for contractor segments. Chose 3 to A/B-test the new DACH benefit hook.",
+        },
+        resolved_skill_versions: [
+          { id: "art_b2b_linkedin_v3", version: 3 },
+          { id: "art_utm_v1", version: 1 },
+          { id: "art_contractor_example_v2", version: 2 },
+          { id: "art_eu_compliance_v1", version: 1 },
+        ],
+        output: {
+          output_ref: "blob:strategy_04",
+          summary:
+            "5-channel plan: LinkedIn 40%, Google 25%, Meta 15%, Email 12%, HOL 8%. 2 audience segments. Reused B2B LinkedIn playbook + UTM convention + contractor exemplar + EU compliance.",
+          cost_usd: 10.8,
+          resolved_skills: ["art_b2b_linkedin_v3", "art_utm_v1", "art_contractor_example_v2", "art_eu_compliance_v1"],
+          skills_available_not_used: [],
+          payload: null,
+        },
+      },
+      {
+        id: "content",
+        label: "Content Gen",
+        kind: "agent",
+        status: "waiting",
+        depends_on: ["strategy"],
+        task_id: "task_content_04",
+        confidence: 0.82,
+        cost_tokens: 14800,
+        duration_ms: 31500,
+        needs_human: false,
+        resolved_skill_versions: [
+          { id: "art_brandvoice_v2", version: 2 },
+          { id: "art_utm_v1", version: 1 },
+          { id: "art_contractor_example_v2", version: 2 },
+        ],
+        content_bundle: CONTENT_BUNDLE_CAMP_04,
+        output: {
+          output_ref: "blob:content_04",
+          summary: "7 variants across 5 channels · 3 locales (DE/AT/CH). Contractor exemplar reduced creative tokens 35%. All UTMs per naming convention.",
+          cost_usd: 12.6,
+          resolved_skills: ["art_brandvoice_v2", "art_utm_v1", "art_contractor_example_v2"],
+          skills_available_not_used: [],
+          payload: CONTENT_BUNDLE_CAMP_04.source,
+        },
+      },
+      {
+        id: "qa",
+        label: "QA Check",
+        kind: "tool",
+        status: "waiting",
+        depends_on: ["content"],
+        task_id: "task_qa_04",
+        confidence: 1.0,
+        cost_tokens: 0,
+        duration_ms: 320,
+        needs_human: false,
+        validations: [
+          { rule: "UTM Format v1", result: "pass", detail: "All 7 variants conform to underscore_case, max 64 chars." },
+          { rule: "Naming Convention v1", result: "pass", detail: "All variant IDs follow v_<channel>_<segment>." },
+          { rule: "Link Validity", result: "pass", detail: "All landing URLs resolve to 200." },
+          {
+            rule: "Brand Voice v2 · No hype words",
+            result: "fail",
+            excerpt: "Revolutionary new impact wrench — SIW 6AT by Hilti",
+            variant_id: "v_g_specifier",
+            detail: "'revolutionary' violates Brand Voice v2 (avoid hype words). Lead with the jobsite problem, then the Hilti solution.",
+          },
+          {
+            rule: "Char Limit · LinkedIn body ≤600",
+            result: "warn",
+            excerpt: "Add the SIW 6AT to your Hilti Fleet plan and replace downtime…",
+            variant_id: "v_li_rental",
+            detail: "Body is 612 chars; LinkedIn truncates at 600 on mobile. Consider trimming the final sentence.",
+          },
+        ],
+        resolved_skill_versions: [{ id: "art_eu_compliance_v1", version: 1 }],
+        output: {
+          output_ref: "blob:qa_04",
+          summary: "3 pass · 1 warn · 1 fail. Brand Voice failure on v_g_specifier blocks H2 by default.",
+          cost_usd: 0,
+          resolved_skills: ["art_eu_compliance_v1"],
+          skills_available_not_used: [],
+          payload: null,
+        },
+      },
+      {
+        id: "h2",
+        label: "H2 — Content Review",
+        kind: "gate",
+        gate: "H2",
+        status: "waiting",
+        depends_on: ["qa"],
+        decision: null,
+      },
+      {
+        id: "rollout",
+        label: "Roll-out",
+        kind: "tool",
+        status: "waiting",
+        depends_on: ["h2"],
+        task_id: "task_rollout_04",
+        confidence: 1.0,
+        cost_tokens: 0,
+        duration_ms: 1500,
+        needs_human: false,
+        connector_calls: [
+          { connector_id: "contentful", action: "write", target: "space:eu/landing-page", status: "pending", timestamp: "" },
+          { connector_id: "dam_frontify", action: "write", target: "folder:q4-powertool/assets", status: "pending", timestamp: "" },
+          { connector_id: "ad_platform_linkedin", action: "publish", target: "campaign:q4_powertool_eu", status: "pending", timestamp: "" },
+          { connector_id: "ad_platform_google", action: "publish", target: "campaign:q4_powertool_eu", status: "pending", timestamp: "" },
+          { connector_id: "sfmc_email", action: "write", target: "basefile:q4_powertool", status: "pending", timestamp: "" },
+          { connector_id: "sprinklr", action: "publish", target: "bulk:q4_powertool_social", status: "pending", timestamp: "" },
+        ],
+        output: null,
+      },
+      { id: "h3", label: "H3 — Publish Gate", kind: "gate", gate: "H3", status: "waiting", depends_on: ["rollout"], decision: null },
+      {
+        id: "learn",
+        label: "Learn & Improve",
+        kind: "agent",
+        status: "waiting",
+        depends_on: ["h3"],
+        task_id: "task_learn_04",
+        confidence: 0.84,
+        cost_tokens: 5200,
+        duration_ms: 16000,
+        needs_human: false,
+        output: null,
+      },
+      { id: "h4", label: "H4 — Insights & Skill Promotion", kind: "gate", gate: "H4", status: "waiting", depends_on: ["learn"], decision: null },
+    ],
+  };
+}
+
+// helpers -----
+function mkAgent(
+  id: string,
+  label: string,
+  depends_on: string[],
+  cost: number,
+  skills: string[],
+  status: any,
+  meta: { conf: number; dur: number; tokens: number },
+): any {
+  return {
+    id, label, kind: "agent", status, depends_on,
+    task_id: `task_${id}_03`,
+    confidence: meta.conf,
+    cost_tokens: meta.tokens,
+    duration_ms: meta.dur,
+    needs_human: false,
+    output: {
+      output_ref: `blob:${id}_03`,
+      summary: `${label} for Q3 Cordless Range.`,
+      cost_usd: cost,
+      resolved_skills: skills,
+      skills_available_not_used: [],
+      payload: null,
+    },
+  };
+}
+function mkTool(id: string, label: string, depends_on: string[], status: any, cost = 0): any {
+  return {
+    id, label, kind: "tool", status, depends_on,
+    task_id: `task_${id}_03`,
+    confidence: 1.0,
+    cost_tokens: 0,
+    duration_ms: 800,
+    output: {
+      output_ref: `blob:${id}_03`,
+      summary: `${label} passed.`,
+      cost_usd: cost,
+      resolved_skills: [],
+      skills_available_not_used: [],
+      payload: id === "qa" ? { checks: [{ rule: "UTM", result: "pass" }, { rule: "Naming", result: "pass" }, { rule: "Brand Voice", result: "pass" }] } : null,
+    },
+  };
+}
+function mkGate(id: string, label: string, gate: any, depends_on: string[], status: any, decision: any): any {
+  return { id, label, kind: "gate", gate, status, depends_on, decision };
+}
+
+export const evalSeries: EvalPoint[] = [
+  { campaign: "Q1 Anchors", order: 1, cost: 52.0, skillsReused: 1, projected: false },
+  { campaign: "Q2 Measuring", order: 2, cost: 40.0, skillsReused: 2, projected: false },
+  { campaign: "Q3 Cordless", order: 3, cost: 33.0, skillsReused: 3, projected: false },
+  { campaign: "Q4 Power Tool", order: 4, cost: 29.0, skillsReused: 4, projected: true },
+];
+
+/** Per-skill quality before/after promotion. */
+export const skillImpactSeries = [
+  { skill: "Contractor Patterns v2", before: 0.79, after: 0.93 },
+  { skill: "B2B Variant Ceiling v1", before: 0.81, after: 0.91 },
+  { skill: "Brand Voice v2", before: 0.85, after: 0.92 },
+];
+
+export const skillNameById = (id: string, registryList: RegistryArtifact[] = registry) =>
+  registryList.find((r) => r.id === id)?.name ?? id;
+
+// Pain-area baselines — cited from Deloitte AI Pre-Read, Mar 2026
+export const deloitteBaselines: DeloitteBaseline[] = [
+  { painArea: "Content Creation", hoursPerYear: 1140, kchfPerYear: 375, citation: "Deloitte AI Pre-Read, Mar 2026, pp.10-12", validatedInPilot: false },
+  { painArea: "Paid Media", hoursPerYear: 180, kchfPerYear: 54, citation: "Deloitte AI Pre-Read, Mar 2026, pp.10-12", validatedInPilot: false },
+  { painArea: "UTM & QA", hoursPerYear: 120, citation: "Deloitte AI Pre-Read, Mar 2026, pp.10-12", validatedInPilot: false },
+  { painArea: "Planning & Other", hoursPerYear: 345, citation: "Deloitte AI Pre-Read, Mar 2026, pp.29-31 — balance of 1,785h total", validatedInPilot: false },
+];
+
+export const TOTAL_BASELINE_HOURS = 1785;
+
+export const painAreaRollup: PainAreaRollup[] = [
+  { campaign: "Q1 Anchors", contentCreation: 180, paidMedia: 20, utmQa: 30, planningOther: 90 },
+  { campaign: "Q2 Measuring", contentCreation: 250, paidMedia: 25, utmQa: 35, planningOther: 70 },
+  { campaign: "Q3 Cordless", contentCreation: 300, paidMedia: 28, utmQa: 40, planningOther: 72 },
+  { campaign: "Q4 Power Tool", contentCreation: 285, paidMedia: 28, utmQa: 48, planningOther: 84 },
+];
+
+export const compoundingSeries: CompoundingPoint[] = [
+  { campaignNumber: 1, campaign: "Q1 Anchors", hoursReturned: 320, qualityAvg: 3.2, firstPassRate: 0.25, changeRequests: 3, repairLoops: 3, skillsReused: 1, humanReviewHours: 1.8, costUsd: 52.0 },
+  { campaignNumber: 2, campaign: "Q2 Measuring", hoursReturned: 380, qualityAvg: 3.6, firstPassRate: 0.50, changeRequests: 2, repairLoops: 2, skillsReused: 2, humanReviewHours: 1.1, costUsd: 40.0 },
+  { campaignNumber: 3, campaign: "Q3 Cordless", hoursReturned: 440, qualityAvg: 4.0, firstPassRate: 0.75, changeRequests: 1, repairLoops: 0, skillsReused: 3, humanReviewHours: 0.5, costUsd: 33.0 },
+  { campaignNumber: 4, campaign: "Q4 Power Tool", hoursReturned: 445, qualityAvg: 4.3, firstPassRate: 1.0, changeRequests: 0, repairLoops: 0, skillsReused: 4, humanReviewHours: 0.37, costUsd: 31.4, aiPromoted: 2 },
+];
