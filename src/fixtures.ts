@@ -4,6 +4,9 @@ import type {
   EvalPoint,
   SkillProposal,
   CampaignTemplate,
+  DeloitteBaseline,
+  PainAreaRollup,
+  CompoundingPoint,
 } from "./types";
 import { CONTENT_BUNDLE_CAMP_04 } from "./lib/contentFixtures";
 
@@ -447,3 +450,27 @@ export const skillImpactSeries = [
 
 export const skillNameById = (id: string, registryList: RegistryArtifact[] = registry) =>
   registryList.find((r) => r.id === id)?.name ?? id;
+
+// Pain-area baselines — cited from Deloitte AI Pre-Read, Mar 2026
+export const deloitteBaselines: DeloitteBaseline[] = [
+  { painArea: "Content Creation", hoursPerYear: 1140, kchfPerYear: 375, citation: "Deloitte AI Pre-Read, Mar 2026, pp.10-12", validatedInPilot: false },
+  { painArea: "Paid Media", hoursPerYear: 180, kchfPerYear: 54, citation: "Deloitte AI Pre-Read, Mar 2026, pp.10-12", validatedInPilot: false },
+  { painArea: "UTM & QA", hoursPerYear: 120, citation: "Deloitte AI Pre-Read, Mar 2026, pp.10-12", validatedInPilot: false },
+  { painArea: "Planning & Other", hoursPerYear: 345, citation: "Deloitte AI Pre-Read, Mar 2026, pp.29-31 — balance of 1,785h total", validatedInPilot: false },
+];
+
+export const TOTAL_BASELINE_HOURS = 1785;
+
+export const painAreaRollup: PainAreaRollup[] = [
+  { campaign: "Q1 Anchors", contentCreation: 180, paidMedia: 20, utmQa: 30, planningOther: 90 },
+  { campaign: "Q2 Measuring", contentCreation: 250, paidMedia: 25, utmQa: 35, planningOther: 70 },
+  { campaign: "Q3 Cordless", contentCreation: 300, paidMedia: 28, utmQa: 40, planningOther: 72 },
+  { campaign: "Q4 Power Tool", contentCreation: 285, paidMedia: 28, utmQa: 48, planningOther: 84 },
+];
+
+export const compoundingSeries: CompoundingPoint[] = [
+  { campaignNumber: 1, campaign: "Q1 Anchors", hoursReturned: 320, qualityAvg: 3.2, firstPassRate: 0.25, changeRequests: 3, repairLoops: 3, skillsReused: 1, humanReviewHours: 1.8, costUsd: 52.0 },
+  { campaignNumber: 2, campaign: "Q2 Measuring", hoursReturned: 380, qualityAvg: 3.6, firstPassRate: 0.50, changeRequests: 2, repairLoops: 2, skillsReused: 2, humanReviewHours: 1.1, costUsd: 40.0 },
+  { campaignNumber: 3, campaign: "Q3 Cordless", hoursReturned: 440, qualityAvg: 4.0, firstPassRate: 0.75, changeRequests: 1, repairLoops: 0, skillsReused: 3, humanReviewHours: 0.5, costUsd: 33.0 },
+  { campaignNumber: 4, campaign: "Q4 Power Tool", hoursReturned: 445, qualityAvg: 4.3, firstPassRate: 1.0, changeRequests: 0, repairLoops: 0, skillsReused: 4, humanReviewHours: 0.37, costUsd: 31.4, aiPromoted: 2 },
+];

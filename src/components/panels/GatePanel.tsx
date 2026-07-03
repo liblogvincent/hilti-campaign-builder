@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import type { GateId } from "@/types";
 import { VariantCard } from "@/components/content/VariantCard";
 import { Link } from "@tanstack/react-router";
+import { AdaptedPlanDiff } from "@/components/panels/AdaptedPlanDiff";
 
 type Mode = "draw" | "type";
 
@@ -185,6 +186,8 @@ export function GatePanel({ config }: { config: GateConfig }) {
         </div>
 
         <div className="space-y-3">{config.whatIsShown}</div>
+
+        {config.gate === "H1" && camp.archetype && <AdaptedPlanDiff />}
 
         <div className="space-y-3 pt-2 border-t border-border">
           <div className="space-y-1.5">

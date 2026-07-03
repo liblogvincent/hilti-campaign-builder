@@ -5,7 +5,8 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
 import { Toaster } from "@/components/ui/sonner";
 
 import appCss from "../styles.css?url";
@@ -18,12 +19,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Luban — Agentic Marketing for Hilti" },
-      { name: "description", content: "Conversational campaign agent with human approval gates and a compounding skills library." },
-      { property: "og:title", content: "Luban — Agentic Marketing for Hilti" },
-      { name: "twitter:title", content: "Luban — Agentic Marketing for Hilti" },
-      { property: "og:description", content: "Conversational campaign agent with human approval gates and a compounding skills library." },
-      { name: "twitter:description", content: "Conversational campaign agent with human approval gates and a compounding skills library." },
+      { title: "Luban — Agentic End2End Engine for Hilti" },
+      { name: "description", content: "Luban is Hilti's agentic end2end marketing engine — natural-language campaign planning, human approval gates, and a compounding skills library." },
+      { property: "og:title", content: "Luban — Agentic End2End Engine for Hilti" },
+      { name: "twitter:title", content: "Luban — Agentic End2End Engine for Hilti" },
+      { property: "og:description", content: "Hilti's agentic end2end marketing engine — natural-language planning, human approval gates, and a compounding skills library." },
+      { name: "twitter:description", content: "Hilti's agentic end2end marketing engine — natural-language planning, human approval gates, and a compounding skills library." },
       { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c4a97b83-03cb-412c-aadd-7549df704892/id-preview-24328a9d--c1091e6c-b426-4c2c-b5ad-0ff8c2f1d969.lovable.app-1782651847678.png" },
       { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c4a97b83-03cb-412c-aadd-7549df704892/id-preview-24328a9d--c1091e6c-b426-4c2c-b5ad-0ff8c2f1d969.lovable.app-1782651847678.png" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -66,19 +67,36 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const layout = useLuban((s) => s.layout);
+  const [isNarrow, setIsNarrow] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1100px)");
+    const update = () => setIsNarrow(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  // On narrow viewports, force one pane at a time so content stays readable.
+  const effectiveLayout = isNarrow && layout === "both" ? "chat" : layout;
 
   return (
     <QueryClientProvider client={queryClient}>
       <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
         <Sidebar />
         <main className="flex flex-1 min-w-0">
-          {layout !== "panel" && (
+          {effectiveLayout !== "panel" && (
             <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
               <Outlet />
             </div>
           )}
-          {layout !== "chat" && (
-            <div className="w-[400px] border-l border-border bg-card flex flex-col overflow-hidden">
+          {effectiveLayout !== "chat" && (
+            <div
+              className={cn(
+                "border-l border-border bg-card flex flex-col overflow-hidden",
+                isNarrow ? "flex-1 min-w-0" : "w-[400px] shrink-0",
+              )}
+            >
               <RightPanel />
             </div>
           )}

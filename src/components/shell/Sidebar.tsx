@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Home, Layers, BookOpen, BarChart3, Settings, PenLine } from "lucide-react";
+import { Home, Layers, BookOpen, BarChart3, Settings, PenLine, ArrowLeft } from "lucide-react";
 import { useLuban } from "@/store/luban";
 import { cn } from "@/lib/utils";
 
@@ -34,7 +34,11 @@ export function Sidebar() {
             for Hilti
           </span>
         </Link>
+        <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
+          Agentic End2End Engine
+        </div>
       </div>
+
 
       <nav className="px-2 space-y-0.5">
         {NAV.map(({ to, label, icon: Icon }) => {
@@ -85,8 +89,18 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="mt-auto px-4 py-4 text-[10px] text-muted-foreground border-t border-sidebar-border">
-        Prototype · v0.1
+      <div className="mt-auto px-4 py-4 text-[10px] text-muted-foreground border-t border-sidebar-border space-y-2">
+        <a
+          href="https://hilti-campaign-builder.vercel.app/"
+          target="_blank"
+          rel="noreferrer"
+          title="Open the previous (v1) prototype"
+          className="flex items-center gap-1.5 -mx-1 px-2 py-1.5 rounded-md border border-border bg-background text-foreground/80 hover:bg-muted/60 hover:text-foreground transition-colors text-[11px] font-medium"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Go Back to Old Version
+        </a>
+        <div>Prototype · v2 (archetype revival)</div>
       </div>
     </aside>
   );

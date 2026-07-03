@@ -29,7 +29,7 @@ function ContentWorkspace() {
   const { focus } = Route.useSearch();
   const camp = useLuban((s) => s.getCampaign(campaignId));
   const bundle = useLuban((s) => s.contentBundles[campaignId]);
-  const history = useLuban((s) => s.contentHistory[campaignId] ?? []);
+  const history = useLuban((s) => s.contentHistory[campaignId]);
   const regenerate = useLuban((s) => s.regenerateContent);
   const undo = useLuban((s) => s.undoRegenerate);
   const requestTranslation = useLuban((s) => s.requestTranslation);
@@ -229,7 +229,7 @@ function ContentWorkspace() {
             >
               <RefreshCw className="w-3 h-3 mr-1" /> Regenerate
             </Button>
-            {history.length > 0 && (
+            {history && history.length > 0 && (
               <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => undo(campaignId)}>
                 <Undo2 className="w-3 h-3 mr-1" /> Undo
               </Button>

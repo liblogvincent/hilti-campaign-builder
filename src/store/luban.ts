@@ -24,6 +24,11 @@ import {
   AT_H4,
 } from "../lib/chatScript";
 import { toast } from "sonner";
+import { selectArchetype, adaptPlanWithRepair } from "../lib/agentClient";
+import { mapPlanToRunNodes } from "../lib/planMapper";
+import { getArchetype } from "../lib/archetypes";
+import { FIXTURE_PLAN } from "../lib/planFixtures";
+import type { ArchetypeSelectOutput } from "../lib/agentSchemas";
 
 export interface ChatMessage {
   id: string;
@@ -32,6 +37,8 @@ export interface ChatMessage {
   ts: number;
   progress?: ProgressLine[];
   action?: { label: string; kind: "open-h1" | "open-h2" | "open-h3" | "open-h4" };
+  /** Present on the archetype-select agent message; UI renders an ArchetypeSelectCard + override dropdown from it. */
+  archetype_pick?: ArchetypeSelectOutput;
 }
 
 export interface ProgressLine {
@@ -60,6 +67,8 @@ interface LubanState {
   /** H2 reviewer flags, key `${campaignId}:${variantId}`. */
   reviewFlags: Record<string, "ok" | "flag">;
   activeCampaignId: string;
+  /** Per-campaign forced archetype overrides (campaignId -> archetype id). Set by the manual-override UI. */
+  archetypeOverrides: Record<string, string>;
   chat: ChatMessage[];
   panelTabs: PanelTab[];
   activeTabId: string;
@@ -111,6 +120,8 @@ interface LubanState {
 
   // Orchestrator
   runOpeningSequence: () => Promise<void>;
+  /** Live-agent entry path: brief -> select archetype -> adapt plan -> map -> store nodes. */
+  runBriefFlow: (brief: string) => Promise<void>;
   approveH1: (signer: string, signature: string, kind: "drawn" | "typed") => Promise<void>;
   rejectH1: (signer: string, signature: string, kind: "drawn" | "typed") => void;
   requestChangesH1: (signer: string, signature: string, kind: "drawn" | "typed") => void;
@@ -149,6 +160,7 @@ const initialState = () => ({
   contentHistory: {} as Record<string, ContentBundle[]>,
   reviewFlags: {} as Record<string, "ok" | "flag">,
   activeCampaignId: "camp_04",
+  archetypeOverrides: {} as Record<string, string>,
   chat: [] as ChatMessage[],
   panelTabs: [HOME_TAB] as PanelTab[],
   activeTabId: "home",
@@ -495,12 +507,85 @@ export const useLuban = create<LubanState>((set, get) => ({
     setNodeStatus(cid, "brief", "done");
     addCost(cid, 2.4);
     get().updateAgentMessage(briefMsg, {
-      progress: [{ nodeId: "brief", label: "Brief ready  [$2.40 · 91% conf]", state: "done", viewLabel: "View Brief" }],
+      progress: [{ nodeId: "brief", label: "Brief ready · 1 standard applied · 4 hrs saved vs. manual", state: "done", viewLabel: "View Brief" }],
     });
 
     await sleep(300);
     setNodeStatus(cid, "h1", "blocked");
     addAgentMessage({ text: AT_H1, action: GATE_ACTION.H1 });
+  },
+
+  runBriefFlow: async (brief) => {
+    const cid = get().activeCampaignId;
+    get().addUserMessage(brief);
+    const forced = get().archetypeOverrides[cid];
+
+    try {
+      const pick: ArchetypeSelectOutput = forced
+        ? {
+            archetype_id: forced,
+            archetype_version: getArchetype(forced)!.version,
+            selection_rationale: {
+              decided: `Operator-forced: ${forced}`,
+              why: ["manual override"],
+              alternatives: [],
+              confidence: 1,
+              knowledge_cited: [],
+            },
+          }
+        : await selectArchetype(brief);
+
+      const archetypeRecord = getArchetype(pick.archetype_id, pick.archetype_version);
+      const archetypeLabel = archetypeRecord?.label ?? pick.archetype_id;
+      // UI (Task 11) renders the ArchetypeSelectCard + override dropdown from archetype_pick.
+      get().addAgentMessage({
+        text: `Using **${archetypeLabel} v${pick.archetype_version}**. ${pick.selection_rationale.decided}`,
+        archetype_pick: pick,
+      });
+
+      const archetype = archetypeRecord!;
+      const { plan, cost_usd, repairAttempts } = await adaptPlanWithRepair(
+        brief,
+        { id: pick.archetype_id, version: pick.archetype_version },
+        archetype,
+      );
+      const nodes = mapPlanToRunNodes(plan);
+
+      set((s) => ({
+        campaigns: s.campaigns.map((c) =>
+          c.id !== cid
+            ? c
+            : {
+                ...c,
+                nodes,
+                archetype: { id: plan.archetype_id, version: plan.archetype_version },
+                adaptation_params: plan.adaptation_params,
+                template_id: plan.archetype_id, // deprecated alias kept in sync
+                template_label: archetype.label,
+              },
+        ),
+      }));
+      if (cost_usd) get().addCost(cid, cost_usd);
+      get().setNodeStatus(cid, "h1", "blocked");
+      get().addAgentMessage({
+        text: repairAttempts
+          ? `Plan adapted (${repairAttempts} self-repair). Review at H1.`
+          : "Plan adapted. Review at H1.",
+        action: { label: "Review at H1 Gate →", kind: "open-h1" },
+      });
+    } catch {
+      get().addAgentMessage({
+        text: "I couldn't produce a valid plan. Falling back to the demo campaign.",
+      });
+      // FIXTURE_PLAN.nodes is already RunNode[]; deep-clone so the fixture stays immutable.
+      const fallbackNodes = JSON.parse(JSON.stringify(FIXTURE_PLAN.nodes)) as typeof FIXTURE_PLAN.nodes;
+      set((s) => ({
+        campaigns: s.campaigns.map((c) =>
+          c.id !== cid ? c : { ...c, nodes: fallbackNodes, archetype: FIXTURE_PLAN.archetype },
+        ),
+      }));
+      get().setNodeStatus(cid, "h1", "blocked");
+    }
   },
 
   approveH1: async (signer, signature, kind) => {
@@ -511,9 +596,9 @@ export const useLuban = create<LubanState>((set, get) => ({
 
     await sleep(400);
     const steps = [
-      { nodeId: "strategy", running: "Generating strategy…", done: "Strategy ready · 4 skills reused  [$10.80 · 86% conf]", viewLabel: "View Plan", cost: 10.8 },
-      { nodeId: "content", running: "Creating content…", done: "Content ready · 3 variants × 3 channels  [$12.60 · 82% conf]", viewLabel: "Preview", cost: 12.6 },
-      { nodeId: "qa", running: "Running QA…", done: "QA passed  4/4 checks  [$0 — deterministic]", viewLabel: "View QA", cost: 0 },
+      { nodeId: "strategy", running: "Generating strategy…", done: "Strategy ready · 4 standards applied · 28 hrs saved vs. manual", viewLabel: "View Plan", cost: 10.8 },
+      { nodeId: "content", running: "Creating content…", done: "Content ready · 3 standards applied · 180 hrs saved vs. manual", viewLabel: "Preview", cost: 12.6 },
+      { nodeId: "qa", running: "Running QA…", done: "QA passed · 4 checks automated · 40 hrs saved vs. manual", viewLabel: "View QA", cost: 0 },
     ];
     const pid = addAgentMessage({
       text: "",
