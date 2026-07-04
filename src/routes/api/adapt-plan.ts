@@ -24,33 +24,30 @@ export const Route = createFileRoute("/api/adapt-plan")({
         const gateway = createAiGatewayProvider(config);
 
         // Vercel hobby plan kills functions after 10s.  The adapt-plan response
-        // is large (14+ nodes) so the LLM can take 5-8s.  Use a soft deadline
-        // that leaves time for the catch block to return the fixture gracefully.
+        // is large (14+ nodes) so the LLM can take 5-8s.  Race against a 7s
+        // deadline — if the LLM doesn't finish in time, bail and return the
+        // fixture before Vercel kills the function.
         const LLM_DEADLINE_MS = 7_000;
 
         try {
-          const ac = new AbortController();
-          const timer = setTimeout(() => ac.abort("adapt-plan LLM deadline exceeded"), LLM_DEADLINE_MS);
-
-          let result: { plan: AdaptedPlanOutput; cost_usd: number };
-          try {
-            const r = await tryWithModelFallback(async (modelId) => {
-              const { output } = await callAgentWithRepair({
-                model: gateway(modelId),
-                schema: AdaptedPlanOutputSchema,
-                system: buildAdaptSystemPrompt(sel),
-                prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
-                abortSignal: ac.signal,
-              });
-              const v = validatePlanAgainstArchetype(output as AdaptedPlanOutput, sel);
-              if (!v.valid) throw new Error(`validation: ${v.errors.join("; ")}`);
-              return { plan: output as AdaptedPlanOutput, cost_usd: 0 };
+          const llmPromise = tryWithModelFallback(async (modelId) => {
+            const { output } = await callAgentWithRepair({
+              model: gateway(modelId),
+              schema: AdaptedPlanOutputSchema,
+              system: buildAdaptSystemPrompt(sel),
+              prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
             });
-            result = r.result;
-          } finally {
-            clearTimeout(timer);
-          }
-          return Response.json({ plan: result.plan, cost_usd: 0 });
+            const v = validatePlanAgainstArchetype(output as AdaptedPlanOutput, sel);
+            if (!v.valid) throw new Error(`validation: ${v.errors.join("; ")}`);
+            return { plan: output as AdaptedPlanOutput, cost_usd: 0 };
+          });
+
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("adapt-plan LLM deadline exceeded")), LLM_DEADLINE_MS),
+          );
+
+          const { result: plan } = await Promise.race([llmPromise, timeoutPromise]);
+          return Response.json({ plan, cost_usd: 0 });
         } catch (e) {
           console.error("adapt-plan failed:", e);
           return Response.json({ plan: toOutput(FIXTURE_PLAN), cost_usd: 0 });

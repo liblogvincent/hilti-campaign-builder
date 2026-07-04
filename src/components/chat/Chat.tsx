@@ -31,10 +31,10 @@ export function Chat() {
 
   const handleSend = async (text: string) => {
     if (!text.trim() || busy) return;
-    addUser(text);
     setInput("");
     setBusy(true);
     try {
+      // runBriefFlow adds the user message itself — don't double-add
       await runBriefFlow(text.trim());
     } finally {
       setBusy(false);
