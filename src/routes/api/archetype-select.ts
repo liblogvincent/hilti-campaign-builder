@@ -11,7 +11,18 @@ export function buildArchetypeSelectSystemPrompt(): string {
 Given a free-text campaign brief, choose the SINGLE best-fitting Campaign Archetype from this library:
 ${library}
 
-Return the archetype id + exact version, plus a DecisionRationale (decided, why, alternatives rejected, confidence 0..1, knowledge_cited).`;
+Return ONLY valid JSON (no markdown, no explanation) matching this structure:
+{
+  "archetype_id": "<id>",
+  "archetype_version": "<version>",
+  "selection_rationale": {
+    "decided": "<one-line summary>",
+    "why": ["<reason>", ...],
+    "alternatives": [{"option": "<id>", "rejected_reason": "<why>"}, ...],
+    "confidence": 0.9,
+    "knowledge_cited": ["<kb entry>", ...]
+  }
+}`;
 }
 
 type Body = { brief?: string };

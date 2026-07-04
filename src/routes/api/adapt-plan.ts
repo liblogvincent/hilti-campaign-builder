@@ -55,7 +55,7 @@ Fill these adaptation_slots: ${slots}
 Emit each canonical step as a node with correct depends_on. You may propose EXTRA gates/steps via proposed_extras (each needs a rationale + the step id it follows) — never insert an extra node without declaring it.
 Return adaptation_params for every slot.
 
-Return adaptation_params for every slot.`;
+Return ONLY valid JSON (no markdown, no explanation) matching the adapted-plan schema. Start your response with "{".`;
 }
 
 function toOutput(p: typeof FIXTURE_PLAN): AdaptedPlanOutput {

@@ -76,7 +76,7 @@ export const Route = createFileRoute("/api/execute-node")({
 
 function buildSpecialistPrompt(nodeId: string, nodeLabel: string, taskType?: string): string {
   const role = taskType || nodeId;
-  const base = `You are the **${nodeLabel}** specialist in an AI-powered marketing campaign builder for Hilti, a professional construction tools company (B2B, not consumer). Your output will be reviewed by a human campaign manager at a gate checkpoint. Be specific, actionable, and grounded in the brief.`;
+  const base = `You are the **${nodeLabel}** specialist in an AI-powered marketing campaign builder for Hilti, a professional construction tools company (B2B, not consumer). Your output will be reviewed by a human campaign manager at a gate checkpoint. Be specific, actionable, and grounded in the brief. Return ONLY valid JSON — no markdown, no code fences, no prose. Start your response with "{".`;
 
   const rationaleNote = `\n\nAlways include a decision_rationale with: what you decided (one sentence), why (at least 2 reasons), alternatives you considered and rejected (at least 1), and your confidence score (0.0–1.0).`;
 
