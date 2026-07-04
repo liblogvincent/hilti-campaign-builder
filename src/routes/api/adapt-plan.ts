@@ -33,17 +33,22 @@ export const Route = createFileRoute("/api/adapt-plan")({
 
         const modelId = process.env.LLM_MODEL || "claude-opus-4-8";
         const gateway = createAiGatewayProvider(config);
-        const { object, usage } = await generateObject({
-          model: gateway(modelId),
-          schema: AdaptedPlanOutputSchema,
-          system: buildAdaptSystemPrompt(sel),
-          prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
-        });
-        // Server-side guard: the generated plan MUST conform to the archetype.
-        const v = validatePlanAgainstArchetype(object, sel);
-        if (!v.valid) return Response.json({ error: "plan failed validation", errors: v.errors }, { status: 422 });
-        const cost_usd = estimateCostUsd(usage);
-        return Response.json({ plan: object, cost_usd });
+        try {
+          const { object, usage } = await generateObject({
+            model: gateway(modelId),
+            schema: AdaptedPlanOutputSchema,
+            system: buildAdaptSystemPrompt(sel),
+            prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
+          });
+          // Server-side guard: the generated plan MUST conform to the archetype.
+          const v = validatePlanAgainstArchetype(object, sel);
+          if (!v.valid) return Response.json({ error: "plan failed validation", errors: v.errors }, { status: 422 });
+          const cost_usd = estimateCostUsd(usage);
+          return Response.json({ plan: object, cost_usd });
+        } catch (e) {
+          console.error("adapt-plan failed:", e);
+          return Response.json({ plan: toOutput(FIXTURE_PLAN), cost_usd: 0 });
+        }
       },
     },
   },

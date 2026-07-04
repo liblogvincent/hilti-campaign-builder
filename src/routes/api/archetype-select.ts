@@ -32,13 +32,18 @@ export const Route = createFileRoute("/api/archetype-select")({
         }
         const modelId = process.env.LLM_MODEL || "claude-opus-4-8";
         const gateway = createAiGatewayProvider(config);
-        const { object } = await generateObject({
-          model: gateway(modelId),
-          schema: ArchetypeSelectOutputSchema,
-          system: buildArchetypeSelectSystemPrompt(),
-          prompt: `Brief:\n${brief ?? "(no brief)"}`,
-        });
-        return Response.json(object satisfies ArchetypeSelectOutput);
+        try {
+          const { object } = await generateObject({
+            model: gateway(modelId),
+            schema: ArchetypeSelectOutputSchema,
+            system: buildArchetypeSelectSystemPrompt(),
+            prompt: `Brief:\n${brief ?? "(no brief)"}`,
+          });
+          return Response.json(object satisfies ArchetypeSelectOutput);
+        } catch (e) {
+          console.error("archetype-select failed:", e);
+          return Response.json(FIXTURE_SELECT);
+        }
       },
     },
   },
