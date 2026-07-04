@@ -12,7 +12,7 @@ describe("archetype library", () => {
     expect(a.mandatory_gates).toEqual(["H1", "H2", "H3", "H4"]);
     const ids = a.steps.map((s) => s.id);
     expect(ids).toEqual(["brief", "strategy", "h1", "content", "qa", "h2", "localization", "rollout", "h3", "learn", "h4"]);
-    expect(a.steps.find((s) => s.id === "qa")!.kind).toBe("tool");
+    expect(a.steps.find((s) => s.id === "qa")!.kind).toBe("agent");
     expect(a.steps.find((s) => s.id === "h1")!.kind).toBe("gate");
   });
 

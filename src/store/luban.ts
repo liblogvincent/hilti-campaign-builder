@@ -24,7 +24,7 @@ import {
   AT_H4,
 } from "../lib/chatScript";
 import { toast } from "sonner";
-import { selectArchetype, adaptPlanWithRepair, executeAgentNode } from "../lib/agentClient";
+import { selectArchetype, adaptPlanWithRepair, executeAgentNode, buildExecuteInput } from "../lib/agentClient";
 import { mapPlanToRunNodes } from "../lib/planMapper";
 import { getArchetype } from "../lib/archetypes";
 import { FIXTURE_PLAN } from "../lib/planFixtures";
@@ -661,18 +661,15 @@ export const useLuban = create<LubanState>((set, get) => ({
       try {
         const brief = _getBrief(cid);
         const planCtx = _planContext(cid);
-        const result = await executeAgentNode({
-          brief,
-          nodeId: nextNode.id,
-          nodeLabel: nextNode.label,
-          taskType: nextNode.task_id,
-          planContext: planCtx,
-        });
+        const result = await executeAgentNode(
+          buildExecuteInput(brief, nextNode.id, nextNode.label, nextNode.task_id, planCtx),
+        );
 
         setNodeStatus(cid, nextNode.id, "done");
         if (result.cost_usd) addCost(cid, result.cost_usd);
-        // Store a brief output summary on the node for downstream context
-        const summary = result.output.slice(0, 120).replace(/\n/g, " ");
+        // Store output summary on the node for downstream context
+        const outputStr = typeof result.output === "string" ? result.output : JSON.stringify(result.output);
+        const summary = outputStr.slice(0, 120).replace(/\n/g, " ");
         const outKey = "_outputSummary";
         set((s) => ({
           campaigns: s.campaigns.map((c) =>
@@ -682,7 +679,7 @@ export const useLuban = create<LubanState>((set, get) => ({
                   ...c,
                   nodes: c.nodes.map((n) =>
                     n.id === nextNode.id
-                      ? { ...n, output: { agent: nextNode.label, generated: result.output, model: process.env.LLM_MODEL || "claude-opus-4-8" } as any, [outKey]: summary }
+                      ? { ...n, output: { agent: nextNode.label, generated: result.output, model: "claude-opus-4-8" as string } as any, [outKey]: summary }
                       : n,
                   ),
                 },

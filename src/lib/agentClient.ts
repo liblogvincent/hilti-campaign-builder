@@ -54,16 +54,19 @@ export async function adaptPlanWithRepair(
   }
 }
 
+import { AGENT_SCHEMA_NAMES } from "./agentSchemas";
+
 export interface ExecuteNodeInput {
   brief: string;
   nodeId: string;
   nodeLabel: string;
   taskType?: string;
   planContext: string;
+  schema?: string;
 }
 
 export interface ExecuteNodeOutput {
-  output: string;
+  output: string | Record<string, unknown>;
   cost_usd: number;
 }
 
@@ -75,4 +78,22 @@ export async function executeAgentNode(input: ExecuteNodeInput): Promise<Execute
   });
   if (!res.ok) throw new Error(`execute-node failed: ${res.status}`);
   return res.json();
+}
+
+/** Build ExecuteNodeInput with the correct schema name for the node's task_type. */
+export function buildExecuteInput(
+  brief: string,
+  nodeId: string,
+  nodeLabel: string,
+  taskType: string | undefined,
+  planContext: string,
+): ExecuteNodeInput {
+  return {
+    brief,
+    nodeId,
+    nodeLabel,
+    taskType,
+    planContext,
+    schema: taskType ? AGENT_SCHEMA_NAMES[taskType] : undefined,
+  };
 }

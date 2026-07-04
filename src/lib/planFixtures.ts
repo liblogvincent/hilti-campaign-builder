@@ -35,7 +35,7 @@ export const FIXTURE_PLAN: AdaptedPlan = {
     { id: "h1", label: "H1 — Plan Approval", kind: "gate", gate: "H1", status: "blocked", depends_on: ["strategy"], decision: null },
     // Phase 2 — Content (after H1)
     { id: "content", label: "Content Gen", kind: "agent", status: "waiting", depends_on: ["h1"] },
-    { id: "qa", label: "QA Check", kind: "tool", status: "waiting", depends_on: ["content"] },
+    { id: "qa", label: "QA Check", kind: "agent", status: "waiting", depends_on: ["content"] },
     { id: "h_legal", label: "H-legal — Legal/Compliance", kind: "gate", gate: "H-legal", status: "waiting", depends_on: ["qa"], decision: null },
     { id: "h2", label: "H2 — Content + QA Review", kind: "gate", gate: "H2", status: "waiting", depends_on: ["h_legal"], decision: null },
     // Phase 3 — Localization + Rollout (between H2 and H3)

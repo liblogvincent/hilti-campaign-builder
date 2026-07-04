@@ -12,7 +12,7 @@ function validPlan(): PlanInput {
       { id: "strategy", kind: "agent", depends_on: ["brief"] },
       { id: "h1", kind: "gate", gate: "H1", depends_on: ["strategy"] },
       { id: "content", kind: "agent", depends_on: ["h1"] },
-      { id: "qa", kind: "tool", depends_on: ["content"] },
+      { id: "qa", kind: "agent", depends_on: ["content"] },
       { id: "h2", kind: "gate", gate: "H2", depends_on: ["qa"] },
       { id: "localization", kind: "agent", depends_on: ["h2"] },
       { id: "rollout", kind: "tool", depends_on: ["localization"] },

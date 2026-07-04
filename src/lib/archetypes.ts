@@ -30,7 +30,7 @@ const paidMediaLaunch: CampaignArchetype = {
     { id: "h1", kind: "gate", label: "H1 — Plan Approval", gate: "H1", depends_on: ["strategy"], task_type: "plan_approval", cardinality: "exactly_one" },
     // Phase 2 — Content (after H1)
     { id: "content", kind: "agent", label: "Content Gen", depends_on: ["h1"], task_type: "create_ad_set", cardinality: "exactly_one" },
-    { id: "qa", kind: "tool", label: "QA Check", depends_on: ["content"], task_type: "voice_fit_review", cardinality: "exactly_one" },
+    { id: "qa", kind: "agent", label: "QA Check", depends_on: ["content"], task_type: "voice_fit_review", cardinality: "exactly_one" },
     { id: "h2", kind: "gate", label: "H2 — Content + QA Review", gate: "H2", depends_on: ["qa"], task_type: "content_review", cardinality: "exactly_one" },
     // Phase 3 — Localization + Rollout (between H2 and H3 per ratified gate spec)
     { id: "localization", kind: "agent", label: "Localization", depends_on: ["h2"], task_type: "localize", cardinality: "exactly_one" },
