@@ -54,17 +54,6 @@ function ContentWorkspace() {
     };
   }, [focus]);
 
-  const activeLoc =
-    !bundle || localeKey === "source"
-      ? null
-      : bundle.localizations.find((l) => l.locale === localeKey) ?? null;
-  const sourceVariants = bundle?.source.variants;
-  const localizedVariants = activeLoc?.variants;
-  const visibleVariants = useMemo(() => {
-    const base = localeKey === "source" ? sourceVariants ?? [] : localizedVariants ?? [];
-    return channel === "all" ? base : base.filter((v) => v.channel === channel);
-  }, [localeKey, sourceVariants, localizedVariants, channel]);
-
   if (!camp) throw notFound();
   if (!bundle)
     return (
@@ -76,6 +65,14 @@ function ContentWorkspace() {
       </div>
     );
 
+  const activeLoc = localeKey === "source" ? null : bundle.localizations.find((l) => l.locale === localeKey);
+  const sourceVariants = bundle.source.variants;
+  const localizedVariants = activeLoc?.variants ?? [];
+  const visibleVariants = useMemo(() => {
+    const base = localeKey === "source" ? sourceVariants : localizedVariants;
+    return channel === "all" ? base : base.filter((v) => v.channel === channel);
+  }, [localeKey, sourceVariants, localizedVariants, channel]);
+
   const qaNode = camp.nodes.find((n) => n.id === "qa");
   const qaByVariant = new Map<string, "warn" | "fail">();
   qaNode?.validations?.forEach((v) => {
@@ -83,7 +80,6 @@ function ContentWorkspace() {
       qaByVariant.set(v.variant_id, v.result);
     }
   });
-
 
   return (
     <div className="flex-1 overflow-y-auto">

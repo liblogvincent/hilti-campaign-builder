@@ -17,6 +17,9 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ContentIndexRouteImport } from './routes/content.index'
 import { Route as ContentCampaignIdRouteImport } from './routes/content.$campaignId'
 import { Route as CampaignIdRouteImport } from './routes/campaign.$id'
+import { Route as ApiArchetypeSelectRouteImport } from './routes/api/archetype-select'
+import { Route as ApiAdaptPlanRouteImport } from './routes/api/adapt-plan'
+import { Route as ApiExecuteNodeRouteImport } from './routes/api/execute-node'
 
 const SkillsRoute = SkillsRouteImport.update({
   id: '/skills',
@@ -58,6 +61,21 @@ const CampaignIdRoute = CampaignIdRouteImport.update({
   path: '/campaign/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiArchetypeSelectRoute = ApiArchetypeSelectRouteImport.update({
+  id: '/api/archetype-select',
+  path: '/api/archetype-select',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdaptPlanRoute = ApiAdaptPlanRouteImport.update({
+  id: '/api/adapt-plan',
+  path: '/api/adapt-plan',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiExecuteNodeRoute = ApiExecuteNodeRouteImport.update({
+  id: '/api/execute-node',
+  path: '/api/execute-node',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -65,6 +83,9 @@ export interface FileRoutesByFullPath {
   '/eval': typeof EvalRoute
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
+  '/api/adapt-plan': typeof ApiAdaptPlanRoute
+  '/api/archetype-select': typeof ApiArchetypeSelectRoute
+  '/api/execute-node': typeof ApiExecuteNodeRoute
   '/campaign/$id': typeof CampaignIdRoute
   '/content/$campaignId': typeof ContentCampaignIdRoute
   '/content/': typeof ContentIndexRoute
@@ -75,6 +96,9 @@ export interface FileRoutesByTo {
   '/eval': typeof EvalRoute
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
+  '/api/adapt-plan': typeof ApiAdaptPlanRoute
+  '/api/archetype-select': typeof ApiArchetypeSelectRoute
+  '/api/execute-node': typeof ApiExecuteNodeRoute
   '/campaign/$id': typeof CampaignIdRoute
   '/content/$campaignId': typeof ContentCampaignIdRoute
   '/content': typeof ContentIndexRoute
@@ -86,6 +110,9 @@ export interface FileRoutesById {
   '/eval': typeof EvalRoute
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
+  '/api/adapt-plan': typeof ApiAdaptPlanRoute
+  '/api/archetype-select': typeof ApiArchetypeSelectRoute
+  '/api/execute-node': typeof ApiExecuteNodeRoute
   '/campaign/$id': typeof CampaignIdRoute
   '/content/$campaignId': typeof ContentCampaignIdRoute
   '/content/': typeof ContentIndexRoute
@@ -98,6 +125,9 @@ export interface FileRouteTypes {
     | '/eval'
     | '/settings'
     | '/skills'
+    | '/api/adapt-plan'
+    | '/api/archetype-select'
+    | '/api/execute-node'
     | '/campaign/$id'
     | '/content/$campaignId'
     | '/content/'
@@ -108,6 +138,9 @@ export interface FileRouteTypes {
     | '/eval'
     | '/settings'
     | '/skills'
+    | '/api/adapt-plan'
+    | '/api/archetype-select'
+    | '/api/execute-node'
     | '/campaign/$id'
     | '/content/$campaignId'
     | '/content'
@@ -118,6 +151,9 @@ export interface FileRouteTypes {
     | '/eval'
     | '/settings'
     | '/skills'
+    | '/api/adapt-plan'
+    | '/api/archetype-select'
+    | '/api/execute-node'
     | '/campaign/$id'
     | '/content/$campaignId'
     | '/content/'
@@ -129,6 +165,9 @@ export interface RootRouteChildren {
   EvalRoute: typeof EvalRoute
   SettingsRoute: typeof SettingsRoute
   SkillsRoute: typeof SkillsRoute
+  ApiAdaptPlanRoute: typeof ApiAdaptPlanRoute
+  ApiArchetypeSelectRoute: typeof ApiArchetypeSelectRoute
+  ApiExecuteNodeRoute: typeof ApiExecuteNodeRoute
   CampaignIdRoute: typeof CampaignIdRoute
   ContentCampaignIdRoute: typeof ContentCampaignIdRoute
   ContentIndexRoute: typeof ContentIndexRoute
@@ -192,6 +231,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CampaignIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/archetype-select': {
+      id: '/api/archetype-select'
+      path: '/api/archetype-select'
+      fullPath: '/api/archetype-select'
+      preLoaderRoute: typeof ApiArchetypeSelectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/adapt-plan': {
+      id: '/api/adapt-plan'
+      path: '/api/adapt-plan'
+      fullPath: '/api/adapt-plan'
+      preLoaderRoute: typeof ApiAdaptPlanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/execute-node': {
+      id: '/api/execute-node'
+      path: '/api/execute-node'
+      fullPath: '/api/execute-node'
+      preLoaderRoute: typeof ApiExecuteNodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -201,6 +261,9 @@ const rootRouteChildren: RootRouteChildren = {
   EvalRoute: EvalRoute,
   SettingsRoute: SettingsRoute,
   SkillsRoute: SkillsRoute,
+  ApiAdaptPlanRoute: ApiAdaptPlanRoute,
+  ApiArchetypeSelectRoute: ApiArchetypeSelectRoute,
+  ApiExecuteNodeRoute: ApiExecuteNodeRoute,
   CampaignIdRoute: CampaignIdRoute,
   ContentCampaignIdRoute: ContentCampaignIdRoute,
   ContentIndexRoute: ContentIndexRoute,
@@ -208,3 +271,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

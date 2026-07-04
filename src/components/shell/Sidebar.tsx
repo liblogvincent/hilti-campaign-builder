@@ -89,8 +89,41 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="mt-auto px-4 py-4 text-[10px] text-muted-foreground border-t border-sidebar-border">
-        Prototype · v0.1
+      <div className="mt-auto px-4 py-4 text-[10px] text-muted-foreground border-t border-sidebar-border space-y-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">Prototype Version</div>
+        <div className="flex gap-1">
+          <a
+            href="https://hilti-campaign-builder.vercel.app/"
+            target="_blank"
+            rel="noreferrer"
+            title="v1 — Luban (campaign-template-led, original)"
+            className="flex-1 text-center px-2 py-1.5 rounded text-[10px] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 transition-colors"
+          >
+            v1
+          </a>
+          <a
+            href="https://fourier-builder2.vercel.app/"
+            target="_blank"
+            rel="noreferrer"
+            title="v2 — Fourier (agent-led, conversational)"
+            className="flex-1 text-center px-2 py-1.5 rounded text-[10px] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 transition-colors"
+          >
+            v2
+          </a>
+          <a
+            href="https://wukong-opal.vercel.app/"
+            target="_blank"
+            rel="noreferrer"
+            title="v3 — Wukong (task-driven, agent-to-agent)"
+            className="flex-1 text-center px-2 py-1.5 rounded text-[10px] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 transition-colors"
+          >
+            v3
+          </a>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          <span>v1 · Archetype Revival (current)</span>
+        </div>
       </div>
     </aside>
   );

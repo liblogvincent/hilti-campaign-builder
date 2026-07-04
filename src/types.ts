@@ -1,4 +1,6 @@
-export type GateId = "H1" | "H2" | "H3" | "H4";
+// Open namespace: canonical {H1,H2,H3,H4} always mandatory via archetype.mandatory_gates;
+// specialist agents may propose extras (e.g. "H-legal"). Ratified 2026-06-29.
+export type GateId = string;
 export type NodeStatus = "done" | "running" | "waiting" | "blocked";
 export type NodeKind = "agent" | "tool" | "gate";
 export type GateDecisionVerdict = "approved" | "changes_requested" | "rejected";
@@ -147,6 +149,8 @@ export interface CampaignRun {
   nodes: RunNode[];
   template_id?: string;
   template_label?: string;
+  archetype?: { id: string; version: string };
+  adaptation_params?: Record<string, unknown>;
   sla_per_gate_hours?: Record<string, number>;
 }
 
@@ -186,6 +190,68 @@ export interface CompoundingPoint {
   humanReviewHours: number;
   costUsd: number;
   aiPromoted?: number;
+}
+
+export interface SkillScope {
+  brand?: string;
+  market?: string | string[];
+  channels?: string[];
+}
+
+export interface ArchetypeStep {
+  id: string;
+  kind: NodeKind; // "agent" | "tool" | "gate"
+  label: string;
+  gate?: string; // when kind === "gate"
+  depends_on: string[];
+  task_type: string;
+  cardinality: "exactly_one" | "zero_or_one" | "one_or_more";
+}
+
+export interface AdaptationSlot {
+  id: string;
+  type: "string_array" | "integer" | "channels" | "extra_gates";
+  label: string;
+  required: boolean;
+  default?: unknown;
+  constraints?: { min?: number; max?: number; enum?: string[] };
+}
+
+export interface CampaignArchetype {
+  id: string;
+  version: string; // semver, e.g. "1.4.0"
+  label: string;
+  campaign_type: string;
+  description: string;
+  steps: ArchetypeStep[];
+  mandatory_gates: string[];
+  adaptation_slots: AdaptationSlot[];
+  default_skill_scope: SkillScope;
+  sla_per_gate_hours: Record<string, number>;
+}
+
+export interface ProposedExtra {
+  kind: "gate" | "step";
+  id: string;
+  after: string; // step id after which this is inserted
+  rationale: string;
+}
+
+// Canonical, backlog-mandated cross-cutting pattern. Supersedes DecisionNote.
+export interface DecisionRationale {
+  decided: string;
+  why: string[];
+  alternatives: { option: string; rejected_reason: string }[];
+  confidence: number; // 0..1
+  knowledge_cited: string[];
+}
+
+export interface AdaptedPlan {
+  archetype: { id: string; version: string };
+  adaptation_params: Record<string, unknown>;
+  nodes: RunNode[];
+  proposed_extras?: ProposedExtra[];
+  selection_rationale: DecisionRationale;
 }
 
 export interface CampaignTemplate {
