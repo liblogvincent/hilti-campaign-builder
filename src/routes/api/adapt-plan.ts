@@ -14,16 +14,8 @@ export const Route = createFileRoute("/api/adapt-plan")({
     handlers: {
       POST: async ({ request }) => {
         const { brief, archetype: pick } = (await request.json()) as Body;
-        const live = (import.meta.env.VITE_LIVE_AGENT ?? "") === "true";
 
-        if (!live) {
-          // Re-validate the fixture plan server-side too (keeps the guard honest).
-          const a = getArchetype(FIXTURE_PLAN.archetype.id, FIXTURE_PLAN.archetype.version)!;
-          const v = validatePlanAgainstArchetype(FIXTURE_PLAN, a);
-          if (!v.valid) return Response.json({ error: "fixture plan invalid", errors: v.errors }, { status: 500 });
-          return Response.json({ plan: toOutput(FIXTURE_PLAN), cost_usd: 0 });
-        }
-
+        // Try live LLM, fall back to fixture if gateway is unavailable
         let config;
         try { config = resolveGatewayConfig(); } catch {
           return Response.json({ plan: toOutput(FIXTURE_PLAN), cost_usd: 0 });

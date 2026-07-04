@@ -18,16 +18,7 @@ export const Route = createFileRoute("/api/execute-node")({
     handlers: {
       POST: async ({ request }) => {
         const { brief, nodeId, nodeLabel, taskType, planContext, schema } = (await request.json()) as Body;
-        const live = (import.meta.env.VITE_LIVE_AGENT ?? "") === "true";
-
-        if (!live) {
-          if (schema) return Response.json({ output: {}, cost_usd: 0 });
-          return Response.json({
-            output: `[demo] ${nodeLabel} output for: ${brief.slice(0, 80)}…`,
-            cost_usd: 0,
-          });
-        }
-
+        // Try live LLM, fall back if gateway is unavailable
         let config;
         try { config = resolveGatewayConfig(); } catch {
           if (schema) return Response.json({ output: {}, cost_usd: 0 });

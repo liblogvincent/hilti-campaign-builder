@@ -22,13 +22,10 @@ export const Route = createFileRoute("/api/archetype-select")({
     handlers: {
       POST: async ({ request }) => {
         const { brief } = (await request.json()) as Body;
-        const live = (import.meta.env.VITE_LIVE_AGENT ?? "") === "true";
-
-        if (!live) return Response.json({ ...FIXTURE_SELECT, _debug: "VITE_LIVE_AGENT not true" });
-
+        // Try live LLM, fall back to fixture if gateway is unavailable
         let config;
-        try { config = resolveGatewayConfig(); } catch (e) {
-          return Response.json({ ...FIXTURE_SELECT, _debug: `gateway config failed: ${e instanceof Error ? e.message : String(e)}` });
+        try { config = resolveGatewayConfig(); } catch {
+          return Response.json(FIXTURE_SELECT);
         }
         const modelId = process.env.LLM_MODEL || "claude-opus-4-8";
         const gateway = createAiGatewayProvider(config);
