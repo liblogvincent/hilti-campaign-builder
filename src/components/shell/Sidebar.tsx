@@ -93,10 +93,10 @@ export function Sidebar() {
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">Prototype Version</div>
         <div className="flex gap-1">
           <a
-            href="https://hilti-campaign-builder.vercel.app/"
+            href="https://hilti-campaign-builder-git-v1archetype-liblogvincents-projects.vercel.app/"
             target="_blank"
             rel="noreferrer"
-            title="v1 — Luban (campaign-template-led, original)"
+            title="v1 — Luban (template-led, original, deprecated)"
             className="flex-1 text-center px-2 py-1.5 rounded text-[10px] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 transition-colors"
           >
             v1
@@ -110,19 +110,16 @@ export function Sidebar() {
           >
             v2
           </a>
-          <a
-            href="https://wukong-opal.vercel.app/"
-            target="_blank"
-            rel="noreferrer"
-            title="v3 — Wukong (task-driven, agent-to-agent)"
-            className="flex-1 text-center px-2 py-1.5 rounded text-[10px] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 transition-colors"
+          <span
+            title="v3 — Archetype Revival (current)"
+            className="flex-1 text-center px-2 py-1.5 rounded text-[10px] font-medium border border-emerald-500/50 bg-emerald-500/10 text-emerald-600 cursor-default"
           >
             v3
-          </a>
+          </span>
         </div>
         <div className="flex items-center gap-1">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span>v1 · Archetype Revival (current)</span>
+          <span>v3 · Archetype Revival (current)</span>
         </div>
       </div>
     </aside>
