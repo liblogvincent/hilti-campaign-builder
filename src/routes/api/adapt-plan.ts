@@ -24,30 +24,32 @@ export const Route = createFileRoute("/api/adapt-plan")({
         const gateway = createAiGatewayProvider(config);
 
         // Vercel hobby plan kills functions after 10s.  The adapt-plan response
-        // is large (14+ nodes) so the LLM can take 5-8s.  Race against a 7s
-        // deadline — if the LLM doesn't finish in time, bail and return the
-        // fixture before Vercel kills the function.
-        const LLM_DEADLINE_MS = 7_000;
+        // is large (14+ nodes) so the LLM can take 5-9s.  Race against a soft
+        // deadline just under the 10s cap — if the LLM doesn't finish in time,
+        // bail and return the fixture before Vercel kills the function.
+        const LLM_DEADLINE_MS = 9_500;
 
         try {
           const llmPromise = tryWithModelFallback(async (modelId) => {
-            const { output } = await callAgentWithRepair({
+            const { output, usage } = await callAgentWithRepair({
               model: gateway(modelId),
               schema: AdaptedPlanOutputSchema,
               system: buildAdaptSystemPrompt(sel),
               prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
+              // Archetype conformance runs inside the repair loop, so a plan that
+              // parses but violates the archetype gets a self-repair turn instead
+              // of failing straight to the fixture.
+              validate: (plan) => validatePlanAgainstArchetype(plan as AdaptedPlanOutput, sel),
             });
-            const v = validatePlanAgainstArchetype(output as AdaptedPlanOutput, sel);
-            if (!v.valid) throw new Error(`validation: ${v.errors.join("; ")}`);
-            return { plan: output as AdaptedPlanOutput, cost_usd: 0 };
+            return { plan: output as AdaptedPlanOutput, cost_usd: estimateCostUsd(usage) };
           });
 
           const timeoutPromise = new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error("adapt-plan LLM deadline exceeded")), LLM_DEADLINE_MS),
           );
 
-          const { result: plan } = await Promise.race([llmPromise, timeoutPromise]);
-          return Response.json({ plan, cost_usd: 0 });
+          const { result } = await Promise.race([llmPromise, timeoutPromise]);
+          return Response.json({ plan: result.plan, cost_usd: result.cost_usd });
         } catch (e) {
           console.error("adapt-plan failed:", e);
           return Response.json({ plan: toOutput(FIXTURE_PLAN), cost_usd: 0 });

@@ -21,11 +21,20 @@ export interface CallAgentOpts<T> {
   prompt: string;
   /** AbortSignal to cancel the underlying generateText call on timeout. */
   abortSignal?: AbortSignal;
+  /**
+   * Optional domain validation, run AFTER schema parsing succeeds. When it
+   * reports errors, they are fed back to the LLM as a self-repair turn — same
+   * budget as JSON/Zod failures. Use for cross-field rules the Zod schema
+   * can't express (e.g. plan-vs-archetype conformance).
+   */
+  validate?: (value: T) => { valid: boolean; errors: string[] };
 }
 
 export interface CallAgentResult<T> {
   output: T;
   repairTurns: number;
+  /** Token usage from the final (successful) generateText call, if the provider reports it. */
+  usage?: { inputTokens?: number; outputTokens?: number };
 }
 
 /** Extract a JSON object from an LLM text response. Handles markdown fences,
@@ -71,14 +80,16 @@ export async function callAgentWithRepair<T>(
   for (;;) {
     // 1. Call the LLM — plain generateText, no Output.object()
     let rawText: string;
+    let usage: { inputTokens?: number; outputTokens?: number } | undefined;
     try {
-      const { text } = await generateText({
+      const { text, usage: u } = await generateText({
         model: opts.model,
         system: workingSystem,
         prompt: opts.prompt,
         abortSignal: opts.abortSignal,
       });
       rawText = text;
+      usage = u;
     } catch (err) {
       // Transport/timeout errors are not self-repairable — re-throw immediately
       throw err;
@@ -87,30 +98,39 @@ export async function callAgentWithRepair<T>(
     // 2. Extract JSON from the response
     const jsonStr = extractJson(rawText);
 
-    // 3. Parse and validate
+    // 3. Parse + schema-validate, then run optional domain validation.
+    //    Any failure (parse / Zod / domain) routes to the same self-repair path.
+    let repairDetail: string | null = null;
     try {
       const parsed = JSON.parse(jsonStr);
       const validated = opts.schema.parse(parsed);
-      return { output: validated as T, repairTurns };
-    } catch (err) {
-      // 4. Self-repair: re-prompt with the specific error
-      if (repairTurns < MAX_REPAIR_TURNS) {
-        repairTurns++;
-        let errDetail: string;
-        if (err instanceof SyntaxError) {
-          errDetail = `JSON parse error: ${err.message}. The text I tried to parse was:\n"""\n${jsonStr.slice(0, 500)}\n"""`;
-        } else if (err instanceof z.ZodError) {
-          errDetail = `Schema validation errors:\n${formatZodErrors(err as z.ZodError)}`;
-        } else {
-          errDetail = err instanceof Error ? err.message : String(err);
-        }
-        workingSystem =
-          opts.system +
-          `\n\nYour previous response was invalid. ${errDetail}\n\nReturn ONLY valid JSON — no markdown, no code fences, no prose. Start your response with "{".`;
-        continue;
+      const domain = opts.validate?.(validated as T);
+      if (domain && !domain.valid) {
+        repairDetail = `Schema was valid but these domain rules failed:\n${domain.errors
+          .map((e) => `- ${e}`)
+          .join("\n")}`;
+      } else {
+        return { output: validated as T, repairTurns, usage };
       }
-      // Exhausted repair turns — throw so caller falls back
-      throw err;
+    } catch (err) {
+      if (err instanceof SyntaxError) {
+        repairDetail = `JSON parse error: ${err.message}. The text I tried to parse was:\n"""\n${jsonStr.slice(0, 500)}\n"""`;
+      } else if (err instanceof z.ZodError) {
+        repairDetail = `Schema validation errors:\n${formatZodErrors(err as z.ZodError)}`;
+      } else {
+        repairDetail = err instanceof Error ? err.message : String(err);
+      }
     }
+
+    // 4. Self-repair: re-prompt with the specific error, or throw once exhausted.
+    if (repairTurns < MAX_REPAIR_TURNS) {
+      repairTurns++;
+      workingSystem =
+        opts.system +
+        `\n\nYour previous response was invalid. ${repairDetail}\n\nReturn ONLY valid JSON — no markdown, no code fences, no prose. Start your response with "{".`;
+      continue;
+    }
+    // Exhausted repair turns — throw so caller falls back
+    throw new Error(repairDetail ?? "callAgentWithRepair: exhausted repair turns");
   }
 }

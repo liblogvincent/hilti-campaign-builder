@@ -46,8 +46,8 @@ export const Route = createFileRoute("/api/execute-node")({
             let lastError: unknown;
             for (const modelId of MODEL_PRIORITY) {
               try {
-                const { output } = await callAgentWithRepair({ model: gateway(modelId), schema: zodSchema, system: systemPrompt, prompt });
-                return Response.json({ output, cost_usd: 0 });
+                const { output, usage } = await callAgentWithRepair({ model: gateway(modelId), schema: zodSchema, system: systemPrompt, prompt });
+                return Response.json({ output, cost_usd: estimateCostUsd(usage) });
               } catch (e) { lastError = e; }
             }
             throw lastError;
