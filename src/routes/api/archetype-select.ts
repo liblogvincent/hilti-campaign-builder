@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { generateObject } from "ai";
-import { createAiGatewayProvider, resolveGatewayConfig } from "@/lib/ai-gateway.server";
+import { createAiGatewayProvider, resolveGatewayConfig, tryWithModelFallback } from "@/lib/ai-gateway.server";
 import { ArchetypeSelectOutputSchema, type ArchetypeSelectOutput } from "@/lib/agentSchemas";
 import { ARCHETYPES } from "@/lib/archetypes";
 import { FIXTURE_SELECT } from "@/lib/planFixtures";
@@ -35,16 +35,18 @@ export const Route = createFileRoute("/api/archetype-select")({
             },
           });
         }
-        const modelId = process.env.LLM_MODEL || "claude-opus-4-8";
         const gateway = createAiGatewayProvider(config);
         try {
-          const { object } = await generateObject({
-            model: gateway(modelId),
-            schema: ArchetypeSelectOutputSchema,
-            system: buildArchetypeSelectSystemPrompt(),
-            prompt: `Brief:\n${brief ?? "(no brief)"}`,
+          const { result: object, model } = await tryWithModelFallback(async (modelId) => {
+            const { object } = await generateObject({
+              model: gateway(modelId),
+              schema: ArchetypeSelectOutputSchema,
+              system: buildArchetypeSelectSystemPrompt(),
+              prompt: `Brief:\n${brief ?? "(no brief)"}`,
+            });
+            return object as ArchetypeSelectOutput;
           });
-          return Response.json(object satisfies ArchetypeSelectOutput);
+          return Response.json({ ...object, _model_used: model });
         } catch (e) {
           console.error("archetype-select failed:", e);
           return Response.json(FIXTURE_SELECT);

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { generateText, generateObject } from "ai";
-import { createAiGatewayProvider, resolveGatewayConfig } from "@/lib/ai-gateway.server";
+import { createAiGatewayProvider, resolveGatewayConfig, MODEL_PRIORITY } from "@/lib/ai-gateway.server";
 import { AGENT_SCHEMA_MAP, AGENT_SCHEMA_NAMES } from "@/lib/agentSchemas";
 
 type Body = {
@@ -28,7 +28,6 @@ export const Route = createFileRoute("/api/execute-node")({
           });
         }
 
-        const modelId = process.env.LLM_MODEL || "claude-opus-4-8";
         const gateway = createAiGatewayProvider(config);
 
         try {
@@ -40,27 +39,31 @@ export const Route = createFileRoute("/api/execute-node")({
             }
 
             const systemPrompt = buildSpecialistPrompt(nodeId, nodeLabel, taskType);
-            const { object, usage } = await generateObject({
-              model: gateway(modelId),
-              schema: zodSchema,
-              system: systemPrompt,
-              prompt: `Campaign brief:\n"""\n${brief}\n"""\n\nPlan context (completed phases):\n"""\n${planContext || "(none yet)"}\n"""\n\nYour task: produce the structured output for the **${nodeLabel}** phase.`,
-            });
+            const prompt = `Campaign brief:\n"""\n${brief}\n"""\n\nPlan context (completed phases):\n"""\n${planContext || "(none yet)"}\n"""\n\nYour task: produce the structured output for the **${nodeLabel}** phase.`;
 
-            const cost_usd = estimateCostUsd(usage);
-            return Response.json({ output: object, cost_usd });
+            // Try models in priority order
+            let lastError: unknown;
+            for (const modelId of MODEL_PRIORITY) {
+              try {
+                const { object, usage } = await generateObject({ model: gateway(modelId), schema: zodSchema, system: systemPrompt, prompt });
+                return Response.json({ output: object, cost_usd: estimateCostUsd(usage) });
+              } catch (e) { lastError = e; }
+            }
+            throw lastError;
           }
 
-          // Free-text path (fallback for nodes without a schema)
+          // Free-text path
           const systemPrompt = buildSpecialistPrompt(nodeId, nodeLabel, taskType);
-          const { text, usage } = await generateText({
-            model: gateway(modelId),
-            system: systemPrompt,
-            prompt: `Campaign brief:\n"""\n${brief}\n"""\n\nPlan context (what's happened so far):\n"""\n${planContext}\n"""\n\nYour task: produce the output for the **${nodeLabel}** phase.`,
-          });
+          const prompt = `Campaign brief:\n"""\n${brief}\n"""\n\nPlan context (what's happened so far):\n"""\n${planContext}\n"""\n\nYour task: produce the output for the **${nodeLabel}** phase.`;
 
-          const cost_usd = estimateCostUsd(usage);
-          return Response.json({ output: text, cost_usd });
+          let lastError: unknown;
+          for (const modelId of MODEL_PRIORITY) {
+            try {
+              const { text, usage } = await generateText({ model: gateway(modelId), system: systemPrompt, prompt });
+              return Response.json({ output: text, cost_usd: estimateCostUsd(usage) });
+            } catch (e) { lastError = e; }
+          }
+          throw lastError;
         } catch (e) {
           console.error(`execute-node ${nodeId} failed:`, e);
           return Response.json({ output: schema ? {} : `[error] ${nodeLabel} — LLM call failed`, cost_usd: 0 });

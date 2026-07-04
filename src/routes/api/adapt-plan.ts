@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { generateObject } from "ai";
-import { createAiGatewayProvider, resolveGatewayConfig } from "@/lib/ai-gateway.server";
+import { createAiGatewayProvider, resolveGatewayConfig, tryWithModelFallback } from "@/lib/ai-gateway.server";
 import { AdaptedPlanOutputSchema, type AdaptedPlanOutput } from "@/lib/agentSchemas";
 import { getArchetype } from "@/lib/archetypes";
 import { validatePlanAgainstArchetype } from "@/lib/validatePlan";
@@ -23,20 +23,21 @@ export const Route = createFileRoute("/api/adapt-plan")({
         const sel = pick?.id ? getArchetype(pick.id, pick?.version) : getArchetype("paid-media-launch");
         if (!sel) return Response.json({ error: "unknown archetype" }, { status: 400 });
 
-        const modelId = process.env.LLM_MODEL || "claude-opus-4-8";
         const gateway = createAiGatewayProvider(config);
         try {
-          const { object, usage } = await generateObject({
-            model: gateway(modelId),
-            schema: AdaptedPlanOutputSchema,
-            system: buildAdaptSystemPrompt(sel),
-            prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
+          const { result: object, model } = await tryWithModelFallback(async (modelId) => {
+            const { object, usage } = await generateObject({
+              model: gateway(modelId),
+              schema: AdaptedPlanOutputSchema,
+              system: buildAdaptSystemPrompt(sel),
+              prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
+            });
+            // Server-side guard: the generated plan MUST conform to the archetype.
+            const v = validatePlanAgainstArchetype(object, sel);
+            if (!v.valid) throw new Error(`validation: ${v.errors.join("; ")}`);
+            return { object, cost_usd: estimateCostUsd(usage) };
           });
-          // Server-side guard: the generated plan MUST conform to the archetype.
-          const v = validatePlanAgainstArchetype(object, sel);
-          if (!v.valid) return Response.json({ error: "plan failed validation", errors: v.errors }, { status: 422 });
-          const cost_usd = estimateCostUsd(usage);
-          return Response.json({ plan: object, cost_usd });
+          return Response.json({ plan: object, cost_usd: 0 });
         } catch (e) {
           console.error("adapt-plan failed:", e);
           return Response.json({ plan: toOutput(FIXTURE_PLAN), cost_usd: 0 });

@@ -71,6 +71,25 @@ export function createAiGatewayProvider(
   });
 }
 
+/** Model priority: default → fallback. Tries each in order until one succeeds. */
+export const MODEL_PRIORITY = [process.env.LLM_MODEL || "gpt-5.4", "claude-sonnet-5"];
+
+/** Try each model in MODEL_PRIORITY until one succeeds. Returns result + which model was used. */
+export async function tryWithModelFallback<T>(
+  fn: (modelId: string) => Promise<T>,
+): Promise<{ result: T; model: string }> {
+  let lastError: unknown;
+  for (const modelId of MODEL_PRIORITY) {
+    try {
+      const result = await fn(modelId);
+      return { result, model: modelId };
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+
 /** @deprecated — use createAiGatewayProvider + resolveGatewayConfig instead */
 export function createLovableAiGatewayProvider(
   lovableApiKey: string,
