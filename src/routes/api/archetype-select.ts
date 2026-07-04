@@ -24,8 +24,16 @@ export const Route = createFileRoute("/api/archetype-select")({
         const { brief } = (await request.json()) as Body;
         // Try live LLM, fall back to fixture if gateway is unavailable
         let config;
-        try { config = resolveGatewayConfig(); } catch {
-          return Response.json(FIXTURE_SELECT);
+        try { config = resolveGatewayConfig(); } catch (e) {
+          return Response.json({
+            ...FIXTURE_SELECT,
+            _diag: {
+              error: e instanceof Error ? e.message : String(e),
+              has_key: String(!!process.env.LLM_580_API_KEY),
+              has_url: String(!!process.env.LLM_580_BASE_URL),
+              url_val: (process.env.LLM_580_BASE_URL ?? "NOT SET").slice(0, 40),
+            },
+          });
         }
         const modelId = process.env.LLM_MODEL || "claude-opus-4-8";
         const gateway = createAiGatewayProvider(config);
