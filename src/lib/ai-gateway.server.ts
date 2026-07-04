@@ -72,7 +72,7 @@ export function createAiGatewayProvider(
 }
 
 /** Model priority: default → fallback. Tries each in order until one succeeds. */
-export const MODEL_PRIORITY = [process.env.LLM_MODEL || "gpt-5.4", "claude-sonnet-5"];
+export const MODEL_PRIORITY = [process.env.LLM_MODEL || "claude-opus-4-8", "claude-sonnet-5"];
 
 /** Try each model in MODEL_PRIORITY until one succeeds. Returns result + which model was used. */
 export async function tryWithModelFallback<T>(
