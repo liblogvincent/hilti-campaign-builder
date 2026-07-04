@@ -48,8 +48,9 @@ export const Route = createFileRoute("/api/archetype-select")({
           });
           return Response.json({ ...object, _model_used: model });
         } catch (e) {
-          console.error("archetype-select failed:", e);
-          return Response.json(FIXTURE_SELECT);
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error("archetype-select failed:", msg);
+          return Response.json({ ...FIXTURE_SELECT, _error: msg.slice(0, 200) });
         }
       },
     },
