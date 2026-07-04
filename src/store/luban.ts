@@ -178,7 +178,7 @@ const initialState = () => ({
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const GATE_LABEL: Record<GateId, string> = {
-  H1: "H1 — Brief Approval",
+  H1: "H1 — Plan Approval",
   H2: "H2 — Content Review",
   H3: "H3 — Publish Gate",
   H4: "H4 — Insights & Skill Promotion",
@@ -555,7 +555,10 @@ export const useLuban = create<LubanState>((set, get) => ({
         { id: pick.archetype_id, version: pick.archetype_version },
         archetype,
       );
-      const nodes = mapPlanToRunNodes(plan);
+      // Mark planning-phase nodes as done (LLM just completed them)
+      const nodes = mapPlanToRunNodes(plan).map((n) =>
+        n.id === "brief" || n.id === "strategy" ? { ...n, status: "done" as const } : n,
+      );
 
       set((s) => ({
         campaigns: s.campaigns.map((c) =>

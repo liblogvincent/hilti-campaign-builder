@@ -2,19 +2,20 @@ import { describe, it, expect } from "vitest";
 import { validatePlanAgainstArchetype, type PlanInput } from "../validatePlan";
 import { getArchetype } from "../archetypes";
 
-const A = () => getArchetype("paid-media-launch", "1.4.0")!;
+const A = () => getArchetype("paid-media-launch", "1.5.0")!;
 
 function validPlan(): PlanInput {
   return {
     adaptation_params: { variants_per_segment: 2, channels: ["linkedin"], target_locales: ["de-DE"], segments: ["contractor"] },
     nodes: [
       { id: "brief", kind: "agent", depends_on: [] },
-      { id: "h1", kind: "gate", gate: "H1", depends_on: ["brief"] },
-      { id: "strategy", kind: "agent", depends_on: ["h1"] },
-      { id: "content", kind: "agent", depends_on: ["strategy"] },
+      { id: "strategy", kind: "agent", depends_on: ["brief"] },
+      { id: "h1", kind: "gate", gate: "H1", depends_on: ["strategy"] },
+      { id: "content", kind: "agent", depends_on: ["h1"] },
       { id: "qa", kind: "tool", depends_on: ["content"] },
       { id: "h2", kind: "gate", gate: "H2", depends_on: ["qa"] },
-      { id: "rollout", kind: "tool", depends_on: ["h2"] },
+      { id: "localization", kind: "agent", depends_on: ["h2"] },
+      { id: "rollout", kind: "tool", depends_on: ["localization"] },
       { id: "h3", kind: "gate", gate: "H3", depends_on: ["rollout"] },
       { id: "learn", kind: "agent", depends_on: ["h3"] },
       { id: "h4", kind: "gate", gate: "H4", depends_on: ["learn"] },

@@ -7,7 +7,7 @@ import { getArchetype } from "../archetypes";
 describe("plan mapper + fixtures", () => {
   it("maps a lean plan to RunNodes all in 'waiting' status", () => {
     const nodes = mapPlanToRunNodes({
-      archetype_id: "paid-media-launch", archetype_version: "1.4.0",
+      archetype_id: "paid-media-launch", archetype_version: "1.5.0",
       adaptation_params: {},
       nodes: [{ id: "brief", kind: "agent", label: "Brief", depends_on: [] }],
       selection_rationale: { decided: "x", why: [], alternatives: [], confidence: 0.5, knowledge_cited: [] },
@@ -17,7 +17,7 @@ describe("plan mapper + fixtures", () => {
   });
 
   it("the fixture plan validates against paid-media-launch", () => {
-    const r = validatePlanAgainstArchetype(FIXTURE_PLAN, getArchetype("paid-media-launch", "1.4.0")!);
+    const r = validatePlanAgainstArchetype(FIXTURE_PLAN, getArchetype("paid-media-launch", "1.5.0")!);
     expect(r.valid).toBe(true);
   });
 });

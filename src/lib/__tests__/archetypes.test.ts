@@ -8,16 +8,16 @@ describe("archetype library", () => {
   });
 
   it("paid-media-launch has the canonical step + gate structure", () => {
-    const a = getArchetype("paid-media-launch", "1.4.0")!;
+    const a = getArchetype("paid-media-launch", "1.5.0")!;
     expect(a.mandatory_gates).toEqual(["H1", "H2", "H3", "H4"]);
     const ids = a.steps.map((s) => s.id);
-    expect(ids).toEqual(["brief", "h1", "strategy", "content", "qa", "h2", "rollout", "h3", "learn", "h4"]);
+    expect(ids).toEqual(["brief", "strategy", "h1", "content", "qa", "h2", "localization", "rollout", "h3", "learn", "h4"]);
     expect(a.steps.find((s) => s.id === "qa")!.kind).toBe("tool");
     expect(a.steps.find((s) => s.id === "h1")!.kind).toBe("gate");
   });
 
   it("getArchetype defaults to latest version", () => {
-    expect(getArchetype("paid-media-launch")?.version).toBe("1.4.0");
+    expect(getArchetype("paid-media-launch")?.version).toBe("1.5.0");
   });
 
   it("adaptation slots declare variants_per_segment with bounds", () => {

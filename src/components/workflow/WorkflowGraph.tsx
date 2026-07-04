@@ -23,7 +23,7 @@ function layerize(nodes: RunNode[]): RunNode[][] {
 }
 
 const GATE_TAB_LABEL: Record<string, { id: string; label: string }> = {
-  h1: { id: "h1", label: "H1 — Brief Approval" },
+  h1: { id: "h1", label: "H1 — Plan Approval" },
   h2: { id: "h2", label: "H2 — Content Review" },
   h3: { id: "h3", label: "H3 — Publish Gate" },
   h4: { id: "h4", label: "H4 — Insights & Promotion" },

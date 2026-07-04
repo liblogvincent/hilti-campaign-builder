@@ -171,7 +171,7 @@ export const campaigns: CampaignRun[] = [
     sla_per_gate_hours: SLAS,
     nodes: [
       mkAgent("brief", "Brief", [], 2.2, ["art_brandvoice_v2"], "done", { conf: 0.92, dur: 8400, tokens: 2100 }),
-      mkGate("h1", "H1 — Brief Approval", "H1", ["brief"], "done", {
+      mkGate("h1", "H1 — Plan Approval", "H1", ["brief"], "done", {
         gate: "H1",
         verdict: "approved",
         reviewer: "Sarah Chen",
@@ -231,7 +231,7 @@ function buildCamp04(): CampaignRun {
       },
       {
         id: "h1",
-        label: "H1 — Brief Approval",
+        label: "H1 — Plan Approval",
         kind: "gate",
         gate: "H1",
         status: "waiting",

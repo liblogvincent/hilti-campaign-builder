@@ -7,7 +7,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ArchetypeSelectCard } from "@/components/chat/ArchetypeSelectCard";
 
 const ACTION_TO_TAB: Record<string, { id: string; label: string }> = {
-  "open-h1": { id: "h1", label: "H1 — Brief Approval" },
+  "open-h1": { id: "h1", label: "H1 — Plan Approval" },
   "open-h2": { id: "h2", label: "H2 — Content Review" },
   "open-h3": { id: "h3", label: "H3 — Publish Gate" },
   "open-h4": { id: "h4", label: "H4 — Insights & Promotion" },

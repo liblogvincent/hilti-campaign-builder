@@ -5,7 +5,7 @@ describe("agent schemas sanity", () => {
   it("parses a valid archetype-select output", () => {
     const out = {
       archetype_id: "paid-media-launch",
-      archetype_version: "1.4.0",
+      archetype_version: "1.5.0",
       selection_rationale: {
         decided: "paid-media launch",
         why: ["paid channels in brief"],
@@ -20,7 +20,7 @@ describe("agent schemas sanity", () => {
   it("parses a minimal adapted plan", () => {
     const plan = {
       archetype_id: "paid-media-launch",
-      archetype_version: "1.4.0",
+      archetype_version: "1.5.0",
       adaptation_params: { variants_per_segment: 2 },
       nodes: [
         { id: "brief", kind: "agent", label: "Brief", depends_on: [] },

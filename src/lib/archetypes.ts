@@ -2,7 +2,7 @@ import type { CampaignArchetype } from "../types";
 
 const paidMediaLaunch: CampaignArchetype = {
   id: "paid-media-launch",
-  version: "1.4.0",
+  version: "1.5.0",
   label: "Paid-Media Launch",
   campaign_type: "paid_media",
   description: "Single-market paid search + social launch with localization, QA, roll-out, and insights.",
@@ -23,14 +23,20 @@ const paidMediaLaunch: CampaignArchetype = {
     },
   ],
   steps: [
-    { id: "brief", kind: "agent", label: "Brief", depends_on: [], task_type: "brief_intake", cardinality: "exactly_one" },
-    { id: "h1", kind: "gate", label: "H1 — Brief Approval", gate: "H1", depends_on: ["brief"], task_type: "brief_approval", cardinality: "exactly_one" },
-    { id: "strategy", kind: "agent", label: "Strategy Plan", depends_on: ["h1"], task_type: "campaign_plan", cardinality: "exactly_one" },
-    { id: "content", kind: "agent", label: "Content Gen", depends_on: ["strategy"], task_type: "create_ad_set", cardinality: "exactly_one" },
+    // Phase 1 — Planning (before H1 per ratified gate spec)
+    { id: "brief", kind: "agent", label: "Brief Intake", depends_on: [], task_type: "brief_intake", cardinality: "exactly_one" },
+    { id: "strategy", kind: "agent", label: "Strategy Plan", depends_on: ["brief"], task_type: "campaign_plan", cardinality: "exactly_one" },
+    // H1 gates the plan (brief + strategy together) — ratified gate spec §2
+    { id: "h1", kind: "gate", label: "H1 — Plan Approval", gate: "H1", depends_on: ["strategy"], task_type: "plan_approval", cardinality: "exactly_one" },
+    // Phase 2 — Content (after H1)
+    { id: "content", kind: "agent", label: "Content Gen", depends_on: ["h1"], task_type: "create_ad_set", cardinality: "exactly_one" },
     { id: "qa", kind: "tool", label: "QA Check", depends_on: ["content"], task_type: "voice_fit_review", cardinality: "exactly_one" },
-    { id: "h2", kind: "gate", label: "H2 — Content Review", gate: "H2", depends_on: ["qa"], task_type: "content_review", cardinality: "exactly_one" },
-    { id: "rollout", kind: "tool", label: "Roll-out", depends_on: ["h2"], task_type: "rollout_sequence", cardinality: "exactly_one" },
+    { id: "h2", kind: "gate", label: "H2 — Content + QA Review", gate: "H2", depends_on: ["qa"], task_type: "content_review", cardinality: "exactly_one" },
+    // Phase 3 — Localization + Rollout (between H2 and H3 per ratified gate spec)
+    { id: "localization", kind: "agent", label: "Localization", depends_on: ["h2"], task_type: "localize", cardinality: "exactly_one" },
+    { id: "rollout", kind: "tool", label: "Roll-out", depends_on: ["localization"], task_type: "rollout_sequence", cardinality: "exactly_one" },
     { id: "h3", kind: "gate", label: "H3 — Publish Gate", gate: "H3", depends_on: ["rollout"], task_type: "publish_approval", cardinality: "exactly_one" },
+    // Phase 4 — Optimization (post-live)
     { id: "learn", kind: "agent", label: "Learn & Improve", depends_on: ["h3"], task_type: "insights", cardinality: "exactly_one" },
     { id: "h4", kind: "gate", label: "H4 — Insights & Skill Promotion", gate: "H4", depends_on: ["learn"], task_type: "skill_promotion", cardinality: "exactly_one" },
   ],
