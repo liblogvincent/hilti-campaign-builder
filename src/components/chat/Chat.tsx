@@ -18,7 +18,7 @@ export function Chat() {
   const messages = useLuban((s) => s.chat);
   const addUser = useLuban((s) => s.addUserMessage);
   const addAgent = useLuban((s) => s.addAgentMessage);
-  const run = useLuban((s) => s.runOpeningSequence);
+  const runBriefFlow = useLuban((s) => s.runBriefFlow);
   const openTab = useLuban((s) => s.openTab);
   const setCenter = useLuban((s) => s.setCenterView);
   const [input, setInput] = useState("");
@@ -34,13 +34,11 @@ export function Chat() {
     addUser(text);
     setInput("");
     setBusy(true);
-    const isExpected = text.trim().toLowerCase().includes("q4 power tool");
-    if (!isExpected) {
-      addAgent({ text: OFF_SCRIPT_FALLBACK });
-      await new Promise((r) => setTimeout(r, 700));
+    try {
+      await runBriefFlow(text.trim());
+    } finally {
+      setBusy(false);
     }
-    await run();
-    setBusy(false);
   };
 
   const openGate = (actionKind: string) => {
