@@ -541,18 +541,25 @@ export const useLuban = create<LubanState>((set, get) => ({
           }
         : await selectArchetype(brief);
 
-      const archetypeRecord = getArchetype(pick.archetype_id, pick.archetype_version);
-      const archetypeLabel = archetypeRecord?.label ?? pick.archetype_id;
+      // Normalize version: LLM may return "v1.5.0" — strip leading "v"/"V"
+      const normalizedVersion = pick.archetype_version.replace(/^[vV]/, "");
+      const archetypeRecord = getArchetype(pick.archetype_id, normalizedVersion);
+      // Normalize the pick for display + downstream use
+      const normalizedPick: ArchetypeSelectOutput = {
+        ...pick,
+        archetype_version: normalizedVersion,
+      };
+      const archetypeLabel = archetypeRecord?.label ?? normalizedPick.archetype_id;
       // UI (Task 11) renders the ArchetypeSelectCard + override dropdown from archetype_pick.
       get().addAgentMessage({
-        text: `Using **${archetypeLabel} v${pick.archetype_version}**. ${pick.selection_rationale.decided}`,
-        archetype_pick: pick,
+        text: `Using **${archetypeLabel} v${normalizedVersion}**. ${normalizedPick.selection_rationale.decided}`,
+        archetype_pick: normalizedPick,
       });
 
       const archetype = archetypeRecord!;
       const { plan, cost_usd, repairAttempts } = await adaptPlanWithRepair(
         brief,
-        { id: pick.archetype_id, version: pick.archetype_version },
+        { id: normalizedPick.archetype_id, version: normalizedVersion },
         archetype,
       );
       // Mark planning-phase nodes as done (LLM just completed them)

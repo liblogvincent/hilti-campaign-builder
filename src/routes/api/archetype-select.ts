@@ -14,7 +14,7 @@ ${library}
 Return ONLY valid JSON (no markdown, no explanation) matching this structure:
 {
   "archetype_id": "<id>",
-  "archetype_version": "<version>",
+  "archetype_version": "<exact semver from the library, e.g. \"1.5.0\" — do NOT add a \"v\" prefix>",
   "selection_rationale": {
     "decided": "<one-line summary>",
     "why": ["<reason>", ...],
