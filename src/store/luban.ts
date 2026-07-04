@@ -24,7 +24,7 @@ import {
   AT_H4,
 } from "../lib/chatScript";
 import { toast } from "sonner";
-import { selectArchetype, adaptPlanWithRepair, executeAgentNodeWithRetry, buildExecuteInput } from "../lib/agentClient";
+import { selectArchetype, adaptPlanWithRepair, executeAgentNodeWithRetry, buildExecuteInput, runRolloutConnectors } from "../lib/agentClient";
 import { mapPlanToRunNodes } from "../lib/planMapper";
 import { getArchetype } from "../lib/archetypes";
 import { FIXTURE_PLAN } from "../lib/planFixtures";
@@ -713,7 +713,7 @@ export const useLuban = create<LubanState>((set, get) => ({
       return;
     }
 
-    // Tool node: execute the connector (stubbed for now)
+    // Tool node: execute real connectors + simulated ad platforms
     if (nextNode.kind === "tool") {
       setNodeStatus(cid, nextNode.id, "running");
       const pid = addAgentMessage({
@@ -721,33 +721,46 @@ export const useLuban = create<LubanState>((set, get) => ({
         progress: [{ nodeId: nextNode.id, label: `${nextNode.label}…`, state: "running" }],
       });
 
-      // Simulate connector calls if defined
-      const calls = nextNode.connector_calls ?? [];
-      for (let i = 0; i < calls.length; i++) {
-        await sleep(200);
+      try {
+        const campaign = get().getCampaign(cid)!;
+        const brief = _getBrief(cid);
+        const campaignName = campaign.archetype
+          ? `${campaign.template_label || "Campaign"} — ${campaign.id}`
+          : brief.slice(0, 50);
+
+        const cr = await runRolloutConnectors({
+          campaignName,
+          headline: `${campaignName} — Professional Construction Tools`,
+          body: `Discover how ${campaignName} delivers performance and reliability for construction professionals.`,
+          cta: "Learn More",
+          slug: campaignName.toLowerCase().replace(/\s+/g, "-").slice(0, 50),
+          channels: ["linkedin", "meta", "google"],
+          locales: ["en-US"],
+        });
+
+        addCost(cid, 2.5);
+        const labelParts = cr.results.map((r) => {
+          const icon = r.status === "ok" ? "✅" : r.status === "simulated" ? "⚠️" : "❌";
+          return `${icon} ${r.system}: ${r.detail.slice(0, 60)}`;
+        });
+
         set((s) => ({
           campaigns: s.campaigns.map((c) =>
-            c.id !== cid
-              ? c
-              : {
-                  ...c,
-                  nodes: c.nodes.map((n) => {
-                    if (n.id !== nextNode.id || !n.connector_calls) return n;
-                    const updated = [...n.connector_calls];
-                    updated[i] = { ...updated[i], status: "ok" as const };
-                    return { ...n, connector_calls: updated };
-                  }),
-                },
+            c.id !== cid ? c : { ...c, nodes: c.nodes.map((n) => n.id === nextNode.id ? { ...n, connector_calls: cr.results.map((r) => ({ connector_id: r.system.toLowerCase().replace(/\s+/g, "_"), status: (r.status === "ok" || r.status === "simulated" ? "ok" : "error") as "ok" | "error", detail: r.detail })) } as any : n) },
           ),
         }));
+
+        updateAgentMessage(pid, {
+          text: labelParts.join("\n"),
+          progress: [{ nodeId: nextNode.id, label: `${nextNode.label} · ${cr.results.length} connectors`, state: "done" }],
+        });
+      } catch {
+        updateAgentMessage(pid, {
+          progress: [{ nodeId: nextNode.id, label: `${nextNode.label} · connectors unavailable`, state: "done" }],
+        });
       }
 
       setNodeStatus(cid, nextNode.id, "done");
-      addCost(cid, calls.length * 0.5);
-      updateAgentMessage(pid, {
-        progress: [{ nodeId: nextNode.id, label: `${nextNode.label} · ${calls.length} connectors`, state: "done" }],
-      });
-
       await sleep(200);
       await get().executeNextNodes(cid);
       return;

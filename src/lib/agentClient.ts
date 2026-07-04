@@ -118,6 +118,33 @@ export async function executeAgentNodeWithRetry(
   }
 }
 
+// ── Connector rollout ──
+
+export interface ConnectorCallResult {
+  system: string;
+  status: "ok" | "simulated" | "error";
+  detail: string;
+  url?: string;
+}
+
+export async function runRolloutConnectors(args: {
+  campaignName: string;
+  headline?: string;
+  body?: string;
+  cta?: string;
+  slug?: string;
+  channels?: string[];
+  locales?: string[];
+}): Promise<{ results: ConnectorCallResult[] }> {
+  const res = await fetch("/api/connector-rollout", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  if (!res.ok) throw new Error(`connector-rollout failed: ${res.status}`);
+  return res.json();
+}
+
 /** Build ExecuteNodeInput with the correct schema name for the node's task_type. */
 export function buildExecuteInput(
   brief: string,
