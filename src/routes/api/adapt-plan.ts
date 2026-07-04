@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { generateText } from "ai";
+import { generateText, Output } from "ai";
 import { createAiGatewayProvider, resolveGatewayConfig, tryWithModelFallback } from "@/lib/ai-gateway.server";
 import { AdaptedPlanOutputSchema, type AdaptedPlanOutput } from "@/lib/agentSchemas";
 import { getArchetype } from "@/lib/archetypes";
@@ -24,16 +24,15 @@ export const Route = createFileRoute("/api/adapt-plan")({
         const gateway = createAiGatewayProvider(config);
         try {
           const { result: plan, model } = await tryWithModelFallback(async (modelId) => {
-            const { text, usage } = await generateText({
+            const { output, usage } = await generateText({
               model: gateway(modelId),
               system: buildAdaptSystemPrompt(sel),
-              prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.\n\nReturn ONLY valid JSON (no markdown, no explanation).`,
+              prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
+              output: Output.object({ schema: AdaptedPlanOutputSchema }),
             });
-            const json = extractJson(text);
-            const obj = AdaptedPlanOutputSchema.parse(JSON.parse(json));
-            const v = validatePlanAgainstArchetype(obj, sel);
+            const v = validatePlanAgainstArchetype(output as AdaptedPlanOutput, sel);
             if (!v.valid) throw new Error(`validation: ${v.errors.join("; ")}`);
-            return { plan: obj, cost_usd: estimateCostUsd(usage) };
+            return { plan: output as AdaptedPlanOutput, cost_usd: estimateCostUsd(usage) };
           });
           return Response.json({ plan, cost_usd: 0 });
         } catch (e) {
@@ -56,19 +55,7 @@ Fill these adaptation_slots: ${slots}
 Emit each canonical step as a node with correct depends_on. You may propose EXTRA gates/steps via proposed_extras (each needs a rationale + the step id it follows) — never insert an extra node without declaring it.
 Return adaptation_params for every slot.
 
-Return ONLY valid JSON matching the AdaptedPlanOutput schema:
-{
-  "archetype_id": "${a.id}",
-  "archetype_version": "${a.version}",
-  "adaptation_params": { <slot values> },
-  "nodes": [{"id":"...","kind":"agent|tool|gate","label":"...","gate":"H1",(optional)"depends_on":["..."],"task_type":"..."}],
-  "proposed_extras": [{"kind":"gate|step","id":"...","after":"...","rationale":"..."}],
-  "selection_rationale": {"decided":"...","why":["..."],"alternatives":[{"option":"...","rejected_reason":"..."}],"confidence":0.9,"knowledge_cited":["..."]}
-}`;
-}
-
-function extractJson(text: string): string {
-  return text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+Return adaptation_params for every slot.`;
 }
 
 function toOutput(p: typeof FIXTURE_PLAN): AdaptedPlanOutput {

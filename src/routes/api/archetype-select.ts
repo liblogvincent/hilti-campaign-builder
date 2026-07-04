@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { generateText } from "ai";
+import { generateText, Output } from "ai";
 import { createAiGatewayProvider, resolveGatewayConfig, tryWithModelFallback } from "@/lib/ai-gateway.server";
 import { ArchetypeSelectOutputSchema, type ArchetypeSelectOutput } from "@/lib/agentSchemas";
 import { ARCHETYPES } from "@/lib/archetypes";
@@ -11,18 +11,7 @@ export function buildArchetypeSelectSystemPrompt(): string {
 Given a free-text campaign brief, choose the SINGLE best-fitting Campaign Archetype from this library:
 ${library}
 
-Return ONLY valid JSON (no markdown, no explanation) matching this exact structure:
-{
-  "archetype_id": "<id>",
-  "archetype_version": "<version>",
-  "selection_rationale": {
-    "decided": "<one-line summary>",
-    "why": ["<reason 1>", "<reason 2>"],
-    "alternatives": [{"option": "<id>", "rejected_reason": "<why>"}],
-    "confidence": 0.9,
-    "knowledge_cited": ["<kb entry>"]
-  }
-}`;
+Return the archetype id + exact version, plus a DecisionRationale (decided, why, alternatives rejected, confidence 0..1, knowledge_cited).`;
 }
 
 type Body = { brief?: string };
@@ -38,18 +27,16 @@ export const Route = createFileRoute("/api/archetype-select")({
         }
         const gateway = createAiGatewayProvider(config);
         try {
-          const { result: jsonStr, model } = await tryWithModelFallback(async (modelId) => {
-            const { text } = await generateText({
+          const { result: object, model } = await tryWithModelFallback(async (modelId) => {
+            const { output } = await generateText({
               model: gateway(modelId),
               system: buildArchetypeSelectSystemPrompt(),
               prompt: `Brief:\n${brief ?? "(no brief)"}`,
+              output: Output.object({ schema: ArchetypeSelectOutputSchema }),
             });
-            // Extract JSON from response (handle markdown code blocks)
-            const json = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-            const obj = JSON.parse(json);
-            return ArchetypeSelectOutputSchema.parse(obj);
+            return output as ArchetypeSelectOutput;
           });
-          return Response.json({ ...jsonStr, _model_used: model });
+          return Response.json({ ...object, _model_used: model });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           return Response.json({ ...FIXTURE_SELECT, _error: msg.slice(0, 200) });
