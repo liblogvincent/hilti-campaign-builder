@@ -3,7 +3,6 @@ import { createAiGatewayProvider, resolveGatewayConfig, tryWithModelFallback } f
 import { callAgentWithRepair } from "@/lib/callAgent";
 import { AdaptedPlanLLMSchema, type AdaptedPlanLLMOutput, type AdaptedPlanOutput, type PlanNode } from "@/lib/agentSchemas";
 import { getArchetype } from "@/lib/archetypes";
-import { validatePlanAgainstArchetype } from "@/lib/validatePlan";
 import { FIXTURE_PLAN } from "@/lib/planFixtures";
 import type { CampaignArchetype } from "@/types";
 
@@ -24,10 +23,13 @@ export const Route = createFileRoute("/api/adapt-plan")({
 
         const gateway = createAiGatewayProvider(config);
 
-        // The LLM now returns only the judgment parts (adaptation_params +
-        // proposed_extras + rationale); the 14 deterministic nodes are rebuilt
-        // server-side. That keeps the call small/fast, so a modest soft deadline
-        // under Vercel's 10s function cap is plenty of headroom.
+        // The LLM returns only the judgment parts (adaptation_params +
+        // proposed_extras + rationale); the deterministic node graph AND
+        // archetype conformance are enforced server-side in assemblePlan
+        // (backfill defaults, filter enums, drop invalid extras, rebuild nodes).
+        // So there's no self-repair loop for adapt-plan — a single ~6s call
+        // through 580ai returns a conformant, brief-specific plan well under
+        // Vercel's ~10s function budget. The deadline is only a hang guard.
         const LLM_DEADLINE_MS = 9_500;
 
         try {
@@ -37,10 +39,6 @@ export const Route = createFileRoute("/api/adapt-plan")({
               schema: AdaptedPlanLLMSchema,
               system: buildAdaptSystemPrompt(sel),
               prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
-              // Reconstruct the deterministic node graph from the archetype, then
-              // validate it inside the repair loop — so bad params / proposed_extras
-              // get a self-repair turn instead of failing straight to the fixture.
-              validate: (llm) => validatePlanAgainstArchetype(assemblePlan(llm, sel), sel),
             });
             return { plan: assemblePlan(output, sel), cost_usd: estimateCostUsd(usage) };
           });
@@ -73,20 +71,56 @@ Your job is to decide the adaptation:
 Return ONLY valid JSON (no markdown, no explanation). Start your response with "{".`;
 }
 
-/** Reconstruct the full adapted plan: deterministic archetype nodes + any
- *  LLM-proposed extras, woven into the DAG after the step they follow. */
+/** Reconstruct the full adapted plan and enforce archetype conformance
+ *  server-side: normalize params (backfill required slot defaults, filter
+ *  channel enums), drop invalid proposed_extras, and rebuild the node DAG. */
 export function assemblePlan(llm: AdaptedPlanLLMOutput, a: CampaignArchetype): AdaptedPlanOutput {
+  const stepIds = new Set(a.steps.map((s) => s.id));
+  const extras = sanitizeExtras(llm.proposed_extras, stepIds);
   return {
     archetype_id: llm.archetype_id,
     archetype_version: llm.archetype_version,
-    adaptation_params: llm.adaptation_params,
-    proposed_extras: llm.proposed_extras?.map((e) => ({ kind: e.kind, id: e.id, after: e.after, rationale: e.rationale })),
-    nodes: buildNodesFromArchetype(a, llm.proposed_extras),
+    adaptation_params: normalizeParams(llm.adaptation_params ?? {}, a),
+    proposed_extras: extras.map((e) => ({ kind: e.kind, id: e.id, after: e.after, rationale: e.rationale })),
+    nodes: buildNodesFromArchetype(a, extras),
     selection_rationale: llm.selection_rationale,
   };
 }
 
-function buildNodesFromArchetype(a: CampaignArchetype, extras?: AdaptedPlanLLMOutput["proposed_extras"]): PlanNode[] {
+/** Backfill required slots from archetype defaults and clamp/filter values so
+ *  the plan always satisfies the archetype's slot constraints. */
+function normalizeParams(raw: Record<string, unknown>, a: CampaignArchetype): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...raw };
+  for (const slot of a.adaptation_slots) {
+    const v = out[slot.id];
+    const has = v !== undefined && v !== null;
+    if (slot.type === "channels" || slot.type === "string_array" || slot.type === "extra_gates") {
+      let arr = Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+      const enumv = slot.constraints?.enum;
+      if (enumv && enumv.length) arr = arr.filter((x) => enumv.includes(x));
+      if (arr.length === 0 && Array.isArray(slot.default)) arr = slot.default as string[];
+      if (slot.required || has) out[slot.id] = arr;
+    } else if (slot.type === "integer") {
+      let n = typeof v === "number" && Number.isInteger(v) ? v : (typeof slot.default === "number" ? slot.default : 1);
+      const c = slot.constraints;
+      if (c?.min !== undefined) n = Math.max(c.min, n);
+      if (c?.max !== undefined) n = Math.min(c.max, n);
+      out[slot.id] = n;
+    }
+  }
+  return out;
+}
+
+/** Keep only well-formed extras: non-empty rationale, `after` points at a real
+ *  archetype step, and the id doesn't collide with a canonical step. */
+function sanitizeExtras(
+  extras: AdaptedPlanLLMOutput["proposed_extras"],
+  stepIds: Set<string>,
+): NonNullable<AdaptedPlanLLMOutput["proposed_extras"]> {
+  return (extras ?? []).filter((e) => e.rationale?.trim() && stepIds.has(e.after) && !stepIds.has(e.id));
+}
+
+function buildNodesFromArchetype(a: CampaignArchetype, extras: NonNullable<AdaptedPlanLLMOutput["proposed_extras"]>): PlanNode[] {
   const nodes: PlanNode[] = a.steps.map((s) => ({
     id: s.id,
     kind: s.kind,
@@ -95,7 +129,7 @@ function buildNodesFromArchetype(a: CampaignArchetype, extras?: AdaptedPlanLLMOu
     depends_on: [...s.depends_on],
     task_type: s.kind === "agent" ? s.task_type : undefined,
   }));
-  for (const ex of extras ?? []) {
+  for (const ex of extras) {
     // Rewire successors of `after` to depend on the extra, so it sits in the chain.
     for (const n of nodes) {
       const i = n.depends_on.indexOf(ex.after);
