@@ -34,7 +34,11 @@ export function Sidebar() {
             for Hilti
           </span>
         </Link>
+        <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
+          Agentic End2End Engine
+        </div>
       </div>
+
 
       <nav className="px-2 space-y-0.5">
         {NAV.map(({ to, label, icon: Icon }) => {
@@ -85,8 +89,38 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="mt-auto px-4 py-4 text-[10px] text-muted-foreground border-t border-sidebar-border">
-        Prototype · v0.1
+      <div className="mt-auto px-4 py-4 text-[10px] text-muted-foreground border-t border-sidebar-border space-y-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">Prototype Version</div>
+        <div className="flex gap-1">
+          <a
+            href="https://hilti-campaign-builder-git-v1archetype-liblogvincents-projects.vercel.app/"
+            target="_blank"
+            rel="noreferrer"
+            title="v1 — Luban (template-led, original, deprecated)"
+            className="flex-1 text-center px-2 py-1.5 rounded text-[10px] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 transition-colors"
+          >
+            v1
+          </a>
+          <a
+            href="https://fourier-builder2.vercel.app/"
+            target="_blank"
+            rel="noreferrer"
+            title="v2 — Fourier (agent-led, conversational)"
+            className="flex-1 text-center px-2 py-1.5 rounded text-[10px] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 transition-colors"
+          >
+            v2
+          </a>
+          <span
+            title="v3 — Archetype Revival (current)"
+            className="flex-1 text-center px-2 py-1.5 rounded text-[10px] font-medium border border-emerald-500/50 bg-emerald-500/10 text-emerald-600 cursor-default"
+          >
+            v3
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          <span>v3 · Archetype Revival (current)</span>
+        </div>
       </div>
     </aside>
   );

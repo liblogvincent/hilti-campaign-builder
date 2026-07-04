@@ -24,6 +24,11 @@ import {
   AT_H4,
 } from "../lib/chatScript";
 import { toast } from "sonner";
+import { selectArchetype, adaptPlanWithRepair, executeAgentNodeWithRetry, buildExecuteInput } from "../lib/agentClient";
+import { mapPlanToRunNodes } from "../lib/planMapper";
+import { getArchetype } from "../lib/archetypes";
+import { FIXTURE_PLAN } from "../lib/planFixtures";
+import type { ArchetypeSelectOutput } from "../lib/agentSchemas";
 
 export interface ChatMessage {
   id: string;
@@ -32,6 +37,8 @@ export interface ChatMessage {
   ts: number;
   progress?: ProgressLine[];
   action?: { label: string; kind: "open-h1" | "open-h2" | "open-h3" | "open-h4" };
+  /** Present on the archetype-select agent message; UI renders an ArchetypeSelectCard + override dropdown from it. */
+  archetype_pick?: ArchetypeSelectOutput;
 }
 
 export interface ProgressLine {
@@ -60,6 +67,8 @@ interface LubanState {
   /** H2 reviewer flags, key `${campaignId}:${variantId}`. */
   reviewFlags: Record<string, "ok" | "flag">;
   activeCampaignId: string;
+  /** Per-campaign forced archetype overrides (campaignId -> archetype id). Set by the manual-override UI. */
+  archetypeOverrides: Record<string, string>;
   chat: ChatMessage[];
   panelTabs: PanelTab[];
   activeTabId: string;
@@ -111,6 +120,14 @@ interface LubanState {
 
   // Orchestrator
   runOpeningSequence: () => Promise<void>;
+  /** Live-agent entry path: brief -> select archetype -> adapt plan -> map -> store nodes. */
+  runBriefFlow: (brief: string) => Promise<void>;
+  /** Walk the DAG: execute ready agent/tool nodes, pause at gate nodes. */
+  executeNextNodes: (cid: string) => Promise<void>;
+  /** Internal: build plan context string from completed nodes. */
+  _planContext: (cid: string) => string;
+  /** Internal: get the brief text from chat history. */
+  _getBrief: (cid: string) => string;
   approveH1: (signer: string, signature: string, kind: "drawn" | "typed") => Promise<void>;
   rejectH1: (signer: string, signature: string, kind: "drawn" | "typed") => void;
   requestChangesH1: (signer: string, signature: string, kind: "drawn" | "typed") => void;
@@ -149,6 +166,7 @@ const initialState = () => ({
   contentHistory: {} as Record<string, ContentBundle[]>,
   reviewFlags: {} as Record<string, "ok" | "flag">,
   activeCampaignId: "camp_04",
+  archetypeOverrides: {} as Record<string, string>,
   chat: [] as ChatMessage[],
   panelTabs: [HOME_TAB] as PanelTab[],
   activeTabId: "home",
@@ -160,7 +178,7 @@ const initialState = () => ({
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const GATE_LABEL: Record<GateId, string> = {
-  H1: "H1 — Brief Approval",
+  H1: "H1 — Plan Approval",
   H2: "H2 — Content Review",
   H3: "H3 — Publish Gate",
   H4: "H4 — Insights & Skill Promotion",
@@ -495,7 +513,7 @@ export const useLuban = create<LubanState>((set, get) => ({
     setNodeStatus(cid, "brief", "done");
     addCost(cid, 2.4);
     get().updateAgentMessage(briefMsg, {
-      progress: [{ nodeId: "brief", label: "Brief ready  [$2.40 · 91% conf]", state: "done", viewLabel: "View Brief" }],
+      progress: [{ nodeId: "brief", label: "Brief ready · 1 standard applied · 4 hrs saved vs. manual", state: "done", viewLabel: "View Brief" }],
     });
 
     await sleep(300);
@@ -503,124 +521,313 @@ export const useLuban = create<LubanState>((set, get) => ({
     addAgentMessage({ text: AT_H1, action: GATE_ACTION.H1 });
   },
 
-  approveH1: async (signer, signature, kind) => {
-    const cid = "camp_04";
-    const { signGate, setNodeStatus, addCost, addAgentMessage, updateAgentMessage } = get();
-    signGate(cid, "h1", "approved", signer, "Brief approved for strategy.", signature, kind);
-    addAgentMessage({ text: POST_H1_APPROVE });
+  runBriefFlow: async (brief) => {
+    const cid = get().activeCampaignId;
+    get().addUserMessage(brief);
+    const forced = get().archetypeOverrides[cid];
 
-    await sleep(400);
-    const steps = [
-      { nodeId: "strategy", running: "Generating strategy…", done: "Strategy ready · 4 skills reused  [$10.80 · 86% conf]", viewLabel: "View Plan", cost: 10.8 },
-      { nodeId: "content", running: "Creating content…", done: "Content ready · 3 variants × 3 channels  [$12.60 · 82% conf]", viewLabel: "Preview", cost: 12.6 },
-      { nodeId: "qa", running: "Running QA…", done: "QA passed  4/4 checks  [$0 — deterministic]", viewLabel: "View QA", cost: 0 },
-    ];
-    const pid = addAgentMessage({
-      text: "",
-      progress: steps.map((s) => ({ nodeId: s.nodeId, label: s.running, state: "pending" })),
-    });
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      updateAgentMessage(pid, {
-        progress: steps.map((s, idx) => ({
-          nodeId: s.nodeId,
-          label: idx < i ? s.done : s.running,
-          state: idx < i ? "done" : idx === i ? "running" : "pending",
-          viewLabel: idx < i ? s.viewLabel : undefined,
-        })),
+    try {
+      const pick: ArchetypeSelectOutput = forced
+        ? {
+            archetype_id: forced,
+            archetype_version: getArchetype(forced)!.version,
+            selection_rationale: {
+              decided: `Operator-forced: ${forced}`,
+              why: ["manual override"],
+              alternatives: [],
+              confidence: 1,
+              knowledge_cited: [],
+            },
+          }
+        : await selectArchetype(brief);
+
+      const archetypeRecord = getArchetype(pick.archetype_id, pick.archetype_version);
+      const archetypeLabel = archetypeRecord?.label ?? pick.archetype_id;
+      // UI (Task 11) renders the ArchetypeSelectCard + override dropdown from archetype_pick.
+      get().addAgentMessage({
+        text: `Using **${archetypeLabel} v${pick.archetype_version}**. ${pick.selection_rationale.decided}`,
+        archetype_pick: pick,
       });
-      setNodeStatus(cid, step.nodeId, "running");
-      await sleep(900);
-      setNodeStatus(cid, step.nodeId, "done");
-      if (step.cost) addCost(cid, step.cost);
-      updateAgentMessage(pid, {
-        progress: steps.map((s, idx) => ({
-          nodeId: s.nodeId,
-          label: idx <= i ? s.done : s.running,
-          state: idx <= i ? "done" : "pending",
-          viewLabel: idx <= i ? s.viewLabel : undefined,
-        })),
+
+      const archetype = archetypeRecord!;
+      const { plan, cost_usd, repairAttempts } = await adaptPlanWithRepair(
+        brief,
+        { id: pick.archetype_id, version: pick.archetype_version },
+        archetype,
+      );
+      // Mark planning-phase nodes as done (LLM just completed them)
+      const nodes = mapPlanToRunNodes(plan).map((n) =>
+        n.id === "brief" || n.id === "strategy" ? { ...n, status: "done" as const } : n,
+      );
+
+      set((s) => ({
+        campaigns: s.campaigns.map((c) =>
+          c.id !== cid
+            ? c
+            : {
+                ...c,
+                nodes,
+                archetype: { id: plan.archetype_id, version: plan.archetype_version },
+                adaptation_params: plan.adaptation_params,
+                template_id: plan.archetype_id, // deprecated alias kept in sync
+                template_label: archetype.label,
+              },
+        ),
+      }));
+      if (cost_usd) get().addCost(cid, cost_usd);
+      get().setNodeStatus(cid, "h1", "blocked");
+      get().addAgentMessage({
+        text: repairAttempts
+          ? `Plan adapted (${repairAttempts} self-repair). Review at H1.`
+          : "Plan adapted. Review at H1.",
+        action: { label: "Review at H1 Gate →", kind: "open-h1" },
       });
-      await sleep(300);
+    } catch {
+      get().addAgentMessage({
+        text: "I couldn't produce a valid plan. Falling back to the demo campaign.",
+      });
+      // FIXTURE_PLAN.nodes is already RunNode[]; deep-clone so the fixture stays immutable.
+      const fallbackNodes = JSON.parse(JSON.stringify(FIXTURE_PLAN.nodes)) as typeof FIXTURE_PLAN.nodes;
+      set((s) => ({
+        campaigns: s.campaigns.map((c) =>
+          c.id !== cid ? c : { ...c, nodes: fallbackNodes, archetype: FIXTURE_PLAN.archetype },
+        ),
+      }));
+      get().setNodeStatus(cid, "h1", "blocked");
     }
-    setNodeStatus(cid, "h2", "blocked");
+  },
+
+  // ── DAG execution engine ──
+  // After a gate is approved, walk the plan's nodes in dependency order,
+  // executing agent/tool nodes and pausing at gate nodes.
+
+  /** Build a one-line summary of completed nodes for the plan context. */
+  _planContext: (cid: string) => {
+    const campaign = get().getCampaign(cid);
+    if (!campaign) return "";
+    return campaign.nodes
+      .filter((n) => n.status === "done")
+      .map((n) => `${n.id} (${n.status})${(n as any)._outputSummary ? ": " + (n as any)._outputSummary : ""}`)
+      .join("; ");
+  },
+
+  /** Get the brief text from the campaign's chat history. */
+  _getBrief: (cid: string): string => {
+    const msgs = get().chat;
+    const userMsg = [...msgs].reverse().find((m) => m.role === "user");
+    return userMsg?.text ?? "";
+  },
+
+  /** Execute the next ready nodes in the DAG. Stops when it hits a gate. */
+  executeNextNodes: async (cid: string) => {
+    const { setNodeStatus, addCost, addAgentMessage, updateAgentMessage, _planContext, _getBrief } = get();
+    const campaign = get().getCampaign(cid);
+    if (!campaign) return;
+    // Halt execution if campaign was rejected at any gate
+    if (campaign.status === "Rejected") return;
+
+    // Find nodes whose dependencies are all satisfied and status is "waiting"
+    const nextNode = campaign.nodes.find((n) => {
+      if (n.status !== "waiting") return false;
+      return n.depends_on.every((depId) => {
+        const dep = campaign.nodes.find((d) => d.id === depId);
+        return dep && (dep.status === "done");
+      });
+    });
+
+    if (!nextNode) return;
+
+    // Gate node: pause for human review
+    if (nextNode.kind === "gate") {
+      setNodeStatus(cid, nextNode.id, "blocked");
+      const gateLabel = nextNode.gate ?? nextNode.id;
+      const gateMessages: Record<string, { text: string; action: { label: string; kind: "open-h1" | "open-h2" | "open-h3" | "open-h4" } }> = {
+        H1: { text: "Plan ready for your review.", action: { label: "Review at H1 Gate →", kind: "open-h1" } },
+        H2: { text: "Content and QA complete. Review before rollout.", action: { label: "Review at H2 Gate →", kind: "open-h2" } },
+        H3: { text: "Rollout staged. Review and publish.", action: { label: "Review at H3 Gate →", kind: "open-h3" } },
+        H4: { text: "Campaign complete. Review insights and promote skills.", action: { label: "Review at H4 Gate →", kind: "open-h4" } },
+      };
+      const gm = gateMessages[gateLabel.toUpperCase()];
+      if (gm) addAgentMessage(gm);
+      return;
+    }
+
+    // Agent node: call live LLM
+    if (nextNode.kind === "agent") {
+      setNodeStatus(cid, nextNode.id, "running");
+      const pid = addAgentMessage({
+        text: "",
+        progress: [{ nodeId: nextNode.id, label: `${nextNode.label}…`, state: "running" }],
+      });
+
+      try {
+        const brief = _getBrief(cid);
+        const planCtx = _planContext(cid);
+        const result = await executeAgentNodeWithRetry(
+          buildExecuteInput(brief, nextNode.id, nextNode.label, nextNode.task_id, planCtx),
+        );
+
+        setNodeStatus(cid, nextNode.id, "done");
+        if (result.cost_usd) addCost(cid, result.cost_usd);
+
+        // Surface fallback in UI
+        const labelSuffix = result.fell_back
+          ? ` · fell back${result.repairAttempts > 0 ? ` (${result.repairAttempts} retries)` : ""}`
+          : " · done";
+        updateAgentMessage(pid, {
+          progress: [{ nodeId: nextNode.id, label: `${nextNode.label}${labelSuffix}`, state: "done", viewLabel: result.fell_back ? undefined : "View Output" }],
+        });
+        if (result.fell_back) {
+          toast.error(`${nextNode.label} failed${result.repairAttempts > 0 ? ` after ${result.repairAttempts} retries` : ""} — using fallback`);
+        }
+
+        // Store output summary on the node for downstream context
+        const outputStr = typeof result.output === "string" ? result.output : JSON.stringify(result.output);
+        const summary = outputStr.slice(0, 120).replace(/\n/g, " ");
+        const outKey = "_outputSummary";
+        set((s) => ({
+          campaigns: s.campaigns.map((c) =>
+            c.id !== cid
+              ? c
+              : {
+                  ...c,
+                  nodes: c.nodes.map((n) =>
+                    n.id === nextNode.id
+                      ? { ...n, output: { agent: nextNode.label, generated: result.output, model: "claude-opus-4-8" as string, fell_back: result.fell_back, [outKey]: summary } as any }
+                      : n,
+                  ),
+                },
+          ),
+        }));
+      } catch {
+        setNodeStatus(cid, nextNode.id, "done");
+        updateAgentMessage(pid, {
+          progress: [{ nodeId: nextNode.id, label: `${nextNode.label} · fell back (no gateway)`, state: "done" }],
+        });
+        toast.error(`${nextNode.label} failed — AI gateway not reachable`);
+      }
+
+      // Continue to next node
+      await sleep(200);
+      await get().executeNextNodes(cid);
+      return;
+    }
+
+    // Tool node: execute the connector (stubbed for now)
+    if (nextNode.kind === "tool") {
+      setNodeStatus(cid, nextNode.id, "running");
+      const pid = addAgentMessage({
+        text: "",
+        progress: [{ nodeId: nextNode.id, label: `${nextNode.label}…`, state: "running" }],
+      });
+
+      // Simulate connector calls if defined
+      const calls = nextNode.connector_calls ?? [];
+      for (let i = 0; i < calls.length; i++) {
+        await sleep(200);
+        set((s) => ({
+          campaigns: s.campaigns.map((c) =>
+            c.id !== cid
+              ? c
+              : {
+                  ...c,
+                  nodes: c.nodes.map((n) => {
+                    if (n.id !== nextNode.id || !n.connector_calls) return n;
+                    const updated = [...n.connector_calls];
+                    updated[i] = { ...updated[i], status: "ok" as const };
+                    return { ...n, connector_calls: updated };
+                  }),
+                },
+          ),
+        }));
+      }
+
+      setNodeStatus(cid, nextNode.id, "done");
+      addCost(cid, calls.length * 0.5);
+      updateAgentMessage(pid, {
+        progress: [{ nodeId: nextNode.id, label: `${nextNode.label} · ${calls.length} connectors`, state: "done" }],
+      });
+
+      await sleep(200);
+      await get().executeNextNodes(cid);
+      return;
+    }
+  },
+
+  // ── Gate functions (use actual campaign ID, delegate to DAG executor) ──
+
+  approveH1: async (signer, signature, kind) => {
+    const cid = get().activeCampaignId;
+    const { signGate, addAgentMessage } = get();
+    signGate(cid, "h1", "approved", signer, "Plan approved. Executing campaign.", signature, kind);
+    addAgentMessage({ text: `Plan approved by ${signer}. Executing the campaign plan…` });
     await sleep(300);
-    addAgentMessage({ text: AT_H2, action: GATE_ACTION.H2 });
+    await get().executeNextNodes(cid);
   },
 
   requestChangesH1: (signer, signature, kind) => {
-    const { signGate, addAgentMessage } = get();
-    signGate("camp_04", "h1", "changes_requested", signer, "Please revise brief.", signature, kind);
+    const cid = get().activeCampaignId;
+    const { signGate, addAgentMessage, setNodeStatus } = get();
+    signGate(cid, "h1", "changes_requested", signer, "Please revise plan.", signature, kind);
+    setNodeStatus(cid, "h1", "blocked"); // re-block gate for re-approval
     addAgentMessage({ text: POST_CHANGES });
   },
   rejectH1: (signer, signature, kind) => {
+    const cid = get().activeCampaignId;
     const { signGate, addAgentMessage, setCampaignStatus } = get();
-    signGate("camp_04", "h1", "rejected", signer, "Brief rejected.", signature, kind);
-    setCampaignStatus("camp_04", "Awaiting Review");
-    addAgentMessage({ text: POST_REJECT });
+    signGate(cid, "h1", "rejected", signer, "Plan rejected.", signature, kind);
+    setCampaignStatus(cid, "Rejected");
+    addAgentMessage({ text: "Campaign rejected. No further execution will occur." });
   },
 
   approveH2: async (signer, signature, kind) => {
-    const cid = "camp_04";
-    const { signGate, setNodeStatus, addCost, addAgentMessage, setConnectorCallStatus, reviewFlags } = get();
+    const cid = get().activeCampaignId;
+    const { signGate, addAgentMessage, reviewFlags } = get();
     const flagged = Object.entries(reviewFlags)
       .filter(([k, v]) => k.startsWith(`${cid}:`) && v === "flag")
       .map(([k]) => k.split(":")[1]);
     const note = flagged.length
-      ? `Approved with flags: ${flagged.join(", ")}. Please address before next iteration.`
-      : "Approved for roll-out. All variants cleared review.";
+      ? `Approved with flags: ${flagged.join(", ")}.`
+      : "Approved for rollout.";
     signGate(cid, "h2", "approved", signer, note, signature, kind);
+    addAgentMessage({ text: `Content approved by ${signer}. Proceeding to rollout…` });
     await sleep(300);
-    setNodeStatus(cid, "rollout", "running");
-    const calls = get().getCampaign(cid)?.nodes.find((n) => n.id === "rollout")?.connector_calls ?? [];
-    for (let i = 0; i < calls.length; i++) {
-      await sleep(250);
-      setConnectorCallStatus(cid, "rollout", i, "ok");
-    }
-    setNodeStatus(cid, "rollout", "done");
-    addCost(cid, 4.5);
-    await sleep(400);
-    setNodeStatus(cid, "h3", "blocked");
-    addAgentMessage({ text: AT_H3, action: GATE_ACTION.H3 });
+    await get().executeNextNodes(cid);
   },
 
   requestChangesH2: (signer, signature, kind) => {
+    const cid = get().activeCampaignId;
     const { signGate, setNodeStatus, addAgentMessage } = get();
-    signGate("camp_04", "h2", "changes_requested", signer, "Please revise content.", signature, kind);
-    setNodeStatus("camp_04", "content", "blocked");
+    signGate(cid, "h2", "changes_requested", signer, "Please revise content.", signature, kind);
+    setNodeStatus(cid, "content", "blocked");
     addAgentMessage({ text: POST_CHANGES });
   },
   rejectH2: (signer, signature, kind) => {
+    const cid = get().activeCampaignId;
     const { signGate, addAgentMessage, setCampaignStatus } = get();
-    signGate("camp_04", "h2", "rejected", signer, "Campaign paused.", signature, kind);
-    setCampaignStatus("camp_04", "Awaiting Review");
-    addAgentMessage({ text: POST_REJECT });
+    signGate(cid, "h2", "rejected", signer, "Campaign paused.", signature, kind);
+    setCampaignStatus(cid, "Rejected");
+    addAgentMessage({ text: "Campaign rejected at H2. No further execution will occur." });
   },
 
   approveH3: async (signer, signature, kind) => {
-    const cid = "camp_04";
-    const { signGate, setNodeStatus, addCost, addAgentMessage } = get();
+    const cid = get().activeCampaignId;
+    const { signGate, addAgentMessage } = get();
     signGate(cid, "h3", "approved", signer, "Published.", signature, kind);
-    await sleep(400);
-    setNodeStatus(cid, "learn", "running");
-    await sleep(1100);
-    setNodeStatus(cid, "learn", "done");
-    addCost(cid, 4.7);
-    await sleep(400);
-    setNodeStatus(cid, "h4", "blocked");
-    addAgentMessage({ text: POST_H3_APPROVE });
+    addAgentMessage({ text: `Published by ${signer}. Campaign is live.` });
     await sleep(300);
-    addAgentMessage({ text: AT_H4, action: GATE_ACTION.H4 });
+    await get().executeNextNodes(cid);
   },
   holdH3: (signer, signature, kind) => {
+    const cid = get().activeCampaignId;
     const { signGate, addAgentMessage, setCampaignStatus } = get();
-    signGate("camp_04", "h3", "rejected", signer, "Held — do not publish.", signature, kind);
-    setCampaignStatus("camp_04", "Awaiting Review");
-    addAgentMessage({ text: "Held at H3. Roll-out staged but not published." });
+    signGate(cid, "h3", "rejected", signer, "Held — do not publish.", signature, kind);
+    setCampaignStatus(cid, "Awaiting Review");
+    addAgentMessage({ text: "Held at H3. Rollout staged but not published." });
   },
 
   approveH4: (signer, signature, kind, actions) => {
-    const cid = "camp_04";
+    const cid = get().activeCampaignId;
     const { signGate, addAgentMessage, setCampaignStatus, promoteProposal, rejectProposal } = get();
     actions.forEach((a) => {
       if (a.action === "promote") promoteProposal(a.proposal_id);

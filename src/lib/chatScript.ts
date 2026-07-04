@@ -20,7 +20,7 @@ export const POST_H1_APPROVE =
 export const POST_H3_APPROVE =
   "✓ Published. Running Insights now.";
 export const POST_H4_APPROVE =
-  "✓ Loop closed. Promoted skills are in the registry — next campaign will pick them up automatically.";
+  "✓ Loop closed. Promoted skills are in the registry — next campaign inherits them automatically. 1,600 hours returned to the team across 4 campaigns.";
 export const POST_CHANGES =
   "Got it — I'll rework based on your feedback. What would you like changed?";
 export const POST_REJECT =

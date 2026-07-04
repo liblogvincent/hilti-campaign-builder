@@ -27,9 +27,9 @@ function CampaignsPage() {
           const seg = c.name.split("—")[1]?.trim() ?? c.market;
           const banner =
             c.id === "camp_04"
-              ? { tone: "primary" as const, text: "⬇ in progress — projected 44% cheaper than Q1 baseline." }
+              ? { tone: "primary" as const, text: "445 hrs returned · 4 standards inherited · 0 repair loops" }
               : c.id === "camp_03"
-                ? { tone: "accent" as const, text: "Published — reused 3 skills including 2 AI-promoted from prior campaigns." }
+                ? { tone: "accent" as const, text: "440 hrs returned · 3 standards inherited · first campaign with zero repair loops" }
                 : null;
           return (
             <Link

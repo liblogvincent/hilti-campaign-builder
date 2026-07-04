@@ -4,9 +4,10 @@ import { SUGGESTED_PROMPT, OFF_SCRIPT_FALLBACK, TEMPLATE_ID } from "@/lib/chatSc
 import { Button } from "@/components/ui/button";
 import { Send, Sparkles, ArrowRight, Loader2 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
+import { ArchetypeSelectCard } from "@/components/chat/ArchetypeSelectCard";
 
 const ACTION_TO_TAB: Record<string, { id: string; label: string }> = {
-  "open-h1": { id: "h1", label: "H1 — Brief Approval" },
+  "open-h1": { id: "h1", label: "H1 — Plan Approval" },
   "open-h2": { id: "h2", label: "H2 — Content Review" },
   "open-h3": { id: "h3", label: "H3 — Publish Gate" },
   "open-h4": { id: "h4", label: "H4 — Insights & Promotion" },
@@ -173,6 +174,7 @@ function Message({
         <Sparkles className="w-3.5 h-3.5 text-primary" />
       </div>
       <div className="flex-1 space-y-2 max-w-[80%]">
+        {m.archetype_pick && <ArchetypeSelectCard pick={m.archetype_pick} />}
         {m.text && (
           <div className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/95">{m.text}</div>
         )}
