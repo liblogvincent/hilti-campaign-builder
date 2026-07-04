@@ -19,6 +19,8 @@ export interface CallAgentOpts<T> {
   schema: ZodType<T>;
   system: string;
   prompt: string;
+  /** AbortSignal to cancel the underlying generateText call on timeout. */
+  abortSignal?: AbortSignal;
 }
 
 export interface CallAgentResult<T> {
@@ -74,6 +76,7 @@ export async function callAgentWithRepair<T>(
         model: opts.model,
         system: workingSystem,
         prompt: opts.prompt,
+        abortSignal: opts.abortSignal,
       });
       rawText = text;
     } catch (err) {
