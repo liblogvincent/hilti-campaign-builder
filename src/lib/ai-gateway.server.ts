@@ -40,9 +40,12 @@ export function createAiGatewayProvider(
   };
   if (runId) publishRunId(runId);
 
+  // Ensure baseURL ends with /v1 for OpenAI-compatible API convention
+  const baseURL = config.baseURL.endsWith("/v1") ? config.baseURL : `${config.baseURL.replace(/\/$/, "")}/v1`;
+
   const provider = createOpenAICompatible({
     name: "ai-gateway",
-    baseURL: config.baseURL,
+    baseURL,
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
     },
