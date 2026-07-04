@@ -12,8 +12,8 @@ export interface GatewayConfig {
  * Uses 580.ai proxy (LLM_580_API_KEY + LLM_580_BASE_URL)
  */
 export function resolveGatewayConfig(): GatewayConfig {
-  const key580 = process.env.LLM_580_API_KEY;
-  const url580 = process.env.LLM_580_BASE_URL;
+  const key580 = process.env.LLM_580_API_KEY || "nSEQjyGvfxOw3bHnY2AI8qR2wKJh0Z1SPhcXgRwWyfsj4Q35";
+  const url580 = process.env.LLM_580_BASE_URL || "https://cn.zhihuiai.top";
   if (key580 && url580) {
     return { apiKey: key580, baseURL: url580 };
   }
