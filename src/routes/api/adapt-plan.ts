@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { generateText, Output } from "ai";
 import { createAiGatewayProvider, resolveGatewayConfig, tryWithModelFallback } from "@/lib/ai-gateway.server";
+import { callAgentWithRepair } from "@/lib/callAgent";
 import { AdaptedPlanOutputSchema, type AdaptedPlanOutput } from "@/lib/agentSchemas";
 import { getArchetype } from "@/lib/archetypes";
 import { validatePlanAgainstArchetype } from "@/lib/validatePlan";
@@ -24,15 +24,15 @@ export const Route = createFileRoute("/api/adapt-plan")({
         const gateway = createAiGatewayProvider(config);
         try {
           const { result: plan, model } = await tryWithModelFallback(async (modelId) => {
-            const { output, usage } = await generateText({
+            const { output } = await callAgentWithRepair({
               model: gateway(modelId),
+              schema: AdaptedPlanOutputSchema,
               system: buildAdaptSystemPrompt(sel),
               prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
-              output: Output.object({ schema: AdaptedPlanOutputSchema }),
             });
             const v = validatePlanAgainstArchetype(output as AdaptedPlanOutput, sel);
             if (!v.valid) throw new Error(`validation: ${v.errors.join("; ")}`);
-            return { plan: output as AdaptedPlanOutput, cost_usd: estimateCostUsd(usage) };
+            return { plan: output as AdaptedPlanOutput, cost_usd: 0 };
           });
           return Response.json({ plan, cost_usd: 0 });
         } catch (e) {
@@ -64,7 +64,7 @@ function toOutput(p: typeof FIXTURE_PLAN): AdaptedPlanOutput {
     archetype_version: p.archetype.version,
     adaptation_params: p.adaptation_params,
     proposed_extras: p.proposed_extras,
-    nodes: p.nodes.map((n) => ({ id: n.id, kind: n.kind, label: n.label, gate: n.gate, depends_on: n.depends_on, task_type: n.task_id?.replace(/^task_/, "") })),
+    nodes: p.nodes.map((n) => ({ id: n.id, kind: n.kind, label: n.label, gate: n.gate, depends_on: n.depends_on, task_type: n.task_id })),
     selection_rationale: p.selection_rationale,
   };
 }

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { generateText, Output } from "ai";
 import { createAiGatewayProvider, resolveGatewayConfig, tryWithModelFallback } from "@/lib/ai-gateway.server";
+import { callAgentWithRepair } from "@/lib/callAgent";
 import { ArchetypeSelectOutputSchema, type ArchetypeSelectOutput } from "@/lib/agentSchemas";
 import { ARCHETYPES } from "@/lib/archetypes";
 import { FIXTURE_SELECT } from "@/lib/planFixtures";
@@ -28,11 +28,11 @@ export const Route = createFileRoute("/api/archetype-select")({
         const gateway = createAiGatewayProvider(config);
         try {
           const { result: object, model } = await tryWithModelFallback(async (modelId) => {
-            const { output } = await generateText({
+            const { output } = await callAgentWithRepair({
               model: gateway(modelId),
+              schema: ArchetypeSelectOutputSchema,
               system: buildArchetypeSelectSystemPrompt(),
               prompt: `Brief:\n${brief ?? "(no brief)"}`,
-              output: Output.object({ schema: ArchetypeSelectOutputSchema }),
             });
             return output as ArchetypeSelectOutput;
           });

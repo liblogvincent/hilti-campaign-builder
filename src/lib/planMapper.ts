@@ -9,7 +9,7 @@ export function mapPlanToRunNodes(plan: AdaptedPlanOutput): RunNode[] {
     gate: n.gate,
     status: "waiting",
     depends_on: n.depends_on,
-    task_id: n.task_type ? `task_${n.id}` : undefined,
+    task_id: n.task_type ?? undefined,
     output: null,
     decision: n.kind === "gate" ? null : undefined,
   }));

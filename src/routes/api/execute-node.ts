@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { generateText, Output } from "ai";
+import { generateText } from "ai";
 import { createAiGatewayProvider, resolveGatewayConfig, MODEL_PRIORITY } from "@/lib/ai-gateway.server";
+import { callAgentWithRepair } from "@/lib/callAgent";
 import { AGENT_SCHEMA_MAP, AGENT_SCHEMA_NAMES } from "@/lib/agentSchemas";
 
 type Body = {
@@ -41,12 +42,12 @@ export const Route = createFileRoute("/api/execute-node")({
             const systemPrompt = buildSpecialistPrompt(nodeId, nodeLabel, taskType);
             const prompt = `Campaign brief:\n"""\n${brief}\n"""\n\nPlan context (completed phases):\n"""\n${planContext || "(none yet)"}\n"""\n\nYour task: produce the structured output for the **${nodeLabel}** phase.`;
 
-            // Try models in priority order (v2 pattern: generateText + Output.object)
+            // Try models in priority order with schema-fail self-repair
             let lastError: unknown;
             for (const modelId of MODEL_PRIORITY) {
               try {
-                const { output, usage } = await generateText({ model: gateway(modelId), system: systemPrompt, prompt, output: Output.object({ schema: zodSchema }) });
-                return Response.json({ output, cost_usd: estimateCostUsd(usage) });
+                const { output } = await callAgentWithRepair({ model: gateway(modelId), schema: zodSchema, system: systemPrompt, prompt });
+                return Response.json({ output, cost_usd: 0 });
               } catch (e) { lastError = e; }
             }
             throw lastError;
