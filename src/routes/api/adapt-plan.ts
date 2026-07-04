@@ -1,11 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { generateObject } from "ai";
+import { generateText } from "ai";
 import { createAiGatewayProvider, resolveGatewayConfig, tryWithModelFallback } from "@/lib/ai-gateway.server";
 import { AdaptedPlanOutputSchema, type AdaptedPlanOutput } from "@/lib/agentSchemas";
 import { getArchetype } from "@/lib/archetypes";
 import { validatePlanAgainstArchetype } from "@/lib/validatePlan";
 import { FIXTURE_PLAN } from "@/lib/planFixtures";
-import { mapPlanToRunNodes } from "@/lib/planMapper";
 
 type Body = { brief?: string; archetype?: { id: string; version?: string } };
 
@@ -15,7 +14,6 @@ export const Route = createFileRoute("/api/adapt-plan")({
       POST: async ({ request }) => {
         const { brief, archetype: pick } = (await request.json()) as Body;
 
-        // Try live LLM, fall back to fixture if gateway is unavailable
         let config;
         try { config = resolveGatewayConfig(); } catch {
           return Response.json({ plan: toOutput(FIXTURE_PLAN), cost_usd: 0 });
@@ -25,19 +23,19 @@ export const Route = createFileRoute("/api/adapt-plan")({
 
         const gateway = createAiGatewayProvider(config);
         try {
-          const { result: object, model } = await tryWithModelFallback(async (modelId) => {
-            const { object, usage } = await generateObject({
+          const { result: plan, model } = await tryWithModelFallback(async (modelId) => {
+            const { text, usage } = await generateText({
               model: gateway(modelId),
-              schema: AdaptedPlanOutputSchema,
               system: buildAdaptSystemPrompt(sel),
-              prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.`,
+              prompt: `Brief:\n${brief ?? ""}\n\nAdapt archetype ${sel.id} v${sel.version}.\n\nReturn ONLY valid JSON (no markdown, no explanation).`,
             });
-            // Server-side guard: the generated plan MUST conform to the archetype.
-            const v = validatePlanAgainstArchetype(object, sel);
+            const json = extractJson(text);
+            const obj = AdaptedPlanOutputSchema.parse(JSON.parse(json));
+            const v = validatePlanAgainstArchetype(obj, sel);
             if (!v.valid) throw new Error(`validation: ${v.errors.join("; ")}`);
-            return { object, cost_usd: estimateCostUsd(usage) };
+            return { plan: obj, cost_usd: estimateCostUsd(usage) };
           });
-          return Response.json({ plan: object, cost_usd: 0 });
+          return Response.json({ plan, cost_usd: 0 });
         } catch (e) {
           console.error("adapt-plan failed:", e);
           return Response.json({ plan: toOutput(FIXTURE_PLAN), cost_usd: 0 });
@@ -56,7 +54,21 @@ Canonical steps (id (kind)): ${steps}
 Mandatory gates in order: ${a.mandatory_gates.join(" → ")}
 Fill these adaptation_slots: ${slots}
 Emit each canonical step as a node with correct depends_on. You may propose EXTRA gates/steps via proposed_extras (each needs a rationale + the step id it follows) — never insert an extra node without declaring it.
-Return adaptation_params for every slot.`;
+Return adaptation_params for every slot.
+
+Return ONLY valid JSON matching the AdaptedPlanOutput schema:
+{
+  "archetype_id": "${a.id}",
+  "archetype_version": "${a.version}",
+  "adaptation_params": { <slot values> },
+  "nodes": [{"id":"...","kind":"agent|tool|gate","label":"...","gate":"H1",(optional)"depends_on":["..."],"task_type":"..."}],
+  "proposed_extras": [{"kind":"gate|step","id":"...","after":"...","rationale":"..."}],
+  "selection_rationale": {"decided":"...","why":["..."],"alternatives":[{"option":"...","rejected_reason":"..."}],"confidence":0.9,"knowledge_cited":["..."]}
+}`;
+}
+
+function extractJson(text: string): string {
+  return text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 }
 
 function toOutput(p: typeof FIXTURE_PLAN): AdaptedPlanOutput {
@@ -70,12 +82,7 @@ function toOutput(p: typeof FIXTURE_PLAN): AdaptedPlanOutput {
   };
 }
 
-// Cost attribution: convert AI SDK usage → USD. Tunable; keep conservative.
-// AI SDK v7's LanguageModelUsage exposes inputTokens/outputTokens (renamed from
-// the v3/4 promptTokens/completionTokens the original brief assumed).
 function estimateCostUsd(usage: { inputTokens?: number; outputTokens?: number } | undefined): number {
   if (!usage) return 0;
-  const inUsd = (usage.inputTokens ?? 0) / 1_000_000 * 15;
-  const outUsd = (usage.outputTokens ?? 0) / 1_000_000 * 75;
-  return Number((inUsd + outUsd).toFixed(4));
+  return Number((((usage.inputTokens ?? 0) / 1_000_000) * 15 + ((usage.outputTokens ?? 0) / 1_000_000) * 75).toFixed(4));
 }

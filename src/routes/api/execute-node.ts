@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { generateText, generateObject } from "ai";
+import { generateText } from "ai";
 import { createAiGatewayProvider, resolveGatewayConfig, MODEL_PRIORITY } from "@/lib/ai-gateway.server";
 import { AGENT_SCHEMA_MAP, AGENT_SCHEMA_NAMES } from "@/lib/agentSchemas";
 
@@ -41,11 +41,13 @@ export const Route = createFileRoute("/api/execute-node")({
             const systemPrompt = buildSpecialistPrompt(nodeId, nodeLabel, taskType);
             const prompt = `Campaign brief:\n"""\n${brief}\n"""\n\nPlan context (completed phases):\n"""\n${planContext || "(none yet)"}\n"""\n\nYour task: produce the structured output for the **${nodeLabel}** phase.`;
 
-            // Try models in priority order
+            // Try models in priority order (generateText + manual JSON parse)
             let lastError: unknown;
             for (const modelId of MODEL_PRIORITY) {
               try {
-                const { object, usage } = await generateObject({ model: gateway(modelId), schema: zodSchema, system: systemPrompt, prompt });
+                const { text, usage } = await generateText({ model: gateway(modelId), system: systemPrompt, prompt: prompt + "\n\nReturn ONLY valid JSON (no markdown, no explanation)." });
+                const json = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+                const object = zodSchema.parse(JSON.parse(json));
                 return Response.json({ output: object, cost_usd: estimateCostUsd(usage) });
               } catch (e) { lastError = e; }
             }
