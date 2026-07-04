@@ -42,6 +42,30 @@ export const AdaptedPlanOutputSchema = z.object({
 });
 export type AdaptedPlanOutput = z.infer<typeof AdaptedPlanOutputSchema>;
 
+/**
+ * Lean shape the LLM actually returns for plan adaptation. The `nodes` array is
+ * NOT requested — it's deterministic (the archetype's canonical steps + any
+ * proposed_extras), so the server reconstructs it. Dropping ~14 verbose nodes
+ * from the LLM output keeps the call well under the serverless time budget.
+ */
+export const AdaptedPlanLLMSchema = z.object({
+  archetype_id: z.string(),
+  archetype_version: z.string(),
+  adaptation_params: z.record(z.string(), z.unknown()),
+  proposed_extras: z
+    .array(z.object({
+      kind: z.enum(["gate", "step"]),
+      id: z.string(),
+      after: z.string(),
+      rationale: z.string(),
+      /** Optional human label for the extra node (else synthesized server-side). */
+      label: z.string().optional(),
+    }))
+    .optional(),
+  selection_rationale: rationaleSchema,
+});
+export type AdaptedPlanLLMOutput = z.infer<typeof AdaptedPlanLLMSchema>;
+
 // ── P0 agent output schemas (Track A aligned) ──
 
 // a0 — StructuredBrief (consumed by a1, a2, H1)
