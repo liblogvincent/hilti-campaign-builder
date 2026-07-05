@@ -790,8 +790,14 @@ export function agentModeForPhase(phase: PhaseId): AgentWorkMode {
   return phase === "planning" ? "Plan" : "Build";
 }
 
+export function isHomeCampaignCreationIntent(prompt: string): boolean {
+  const text = prompt.trim().toLowerCase();
+  if (!text) return false;
+  return /\b(create|start|launch|build|plan)\b/.test(text) && /\bcampaign\b/.test(text);
+}
+
 export function homeRouteAfterCampaignLaunch(prompt: string): AppView {
-  return prompt.trim() ? "campaign-planning" : "home";
+  return isHomeCampaignCreationIntent(prompt) ? "home" : "home";
 }
 
 export function restoreAppView(value: string | null): AppView {

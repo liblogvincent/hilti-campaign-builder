@@ -54,7 +54,7 @@ import {
   displayCampaignSummary,
   draftWorkspaceAgentAnswer,
   GateId,
-  homeRouteAfterCampaignLaunch,
+  isHomeCampaignCreationIntent,
   navigationItems,
   nextPhase,
   PandaAgentResponse,
@@ -318,13 +318,24 @@ function App() {
         {
           id: crypto.randomUUID(),
           role: "agent",
-          text: "I created the campaign workspace and opened Campaign Planning. I can now help shape the H1 plan packet, identify missing inputs, and prepare the first gate review.",
+          text: "I created the campaign workspace. Open Campaign Planning when you are ready to shape the H1 plan packet, identify missing inputs, and prepare the first gate review.",
           timestamp: new Date().toISOString()
         }
       ]
     }));
     setHomePrompt("");
-    setView(homeRouteAfterCampaignLaunch(brief));
+    setGlobalPandaOpen(true);
+    setGlobalPandaMessages((items) => [
+      ...items,
+      {
+        id: crypto.randomUUID(),
+        role: "agent",
+        text: `I created ${campaign.name} and kept you on the Home control tower. Open Campaign Planning from the campaign card when you want to work the H1 plan.`,
+        route: "Campaign Planning",
+        highlights: ["Campaign workspace created", "H1 planning is ready", "No automatic navigation"],
+        actions: ["Open Campaign Planning", "Review active campaigns", "Ask Panda for blockers"]
+      }
+    ]);
   }
 
   async function runPhase(userInstruction?: string) {
@@ -438,6 +449,19 @@ function App() {
     } finally {
       setGlobalPandaBusy(false);
     }
+  }
+
+  function submitHomePrompt() {
+    const prompt = homePrompt.trim();
+    if (!prompt) return;
+
+    if (isHomeCampaignCreationIntent(prompt)) {
+      createCampaignFromPrompt(prompt);
+      return;
+    }
+
+    setHomePrompt("");
+    void askGlobalPanda(prompt);
   }
 
   function approveGate() {
@@ -608,7 +632,7 @@ function App() {
               busy={busy}
               campaigns={workspace.campaigns}
               onPromptChange={setHomePrompt}
-              onSubmit={() => createCampaignFromPrompt(homePrompt)}
+              onSubmit={submitHomePrompt}
               onOpenCampaign={(campaignId) => setWorkspace((current) => ({ ...current, activeCampaignId: campaignId }))}
               onOpenProgress={() => setView("progress")}
             />

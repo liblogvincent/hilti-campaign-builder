@@ -25,6 +25,7 @@ import {
   currentPhaseMeta,
   defaultUserRole,
   homeRouteAfterCampaignLaunch,
+  isHomeCampaignCreationIntent,
   navigationItems,
   nextPhase,
   restoreAppView,
@@ -144,8 +145,10 @@ describe("panda run model", () => {
     expect(agentModeForPhase("optimize")).toBe("Build");
   });
 
-  it("routes a new home campaign launch to Campaign Planning", () => {
-    expect(homeRouteAfterCampaignLaunch("launch a campaign of TE70")).toBe("campaign-planning");
+  it("keeps the home orchestrator on Home after campaign creation intent", () => {
+    expect(isHomeCampaignCreationIntent("launch a campaign of TE70")).toBe(true);
+    expect(isHomeCampaignCreationIntent("what is blocked before H2?")).toBe(false);
+    expect(homeRouteAfterCampaignLaunch("launch a campaign of TE70")).toBe("home");
     expect(homeRouteAfterCampaignLaunch("   ")).toBe("home");
   });
 
