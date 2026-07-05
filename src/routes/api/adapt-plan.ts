@@ -30,7 +30,7 @@ export const Route = createFileRoute("/api/adapt-plan")({
         // So there's no self-repair loop for adapt-plan — a single ~6s call
         // through 580ai returns a conformant, brief-specific plan well under
         // Vercel's ~10s function budget. The deadline is only a hang guard.
-        const LLM_DEADLINE_MS = 9_500;
+        const LLM_DEADLINE_MS = 25_000;
 
         try {
           const llmPromise = tryWithModelFallback(async (modelId) => {
@@ -47,11 +47,12 @@ export const Route = createFileRoute("/api/adapt-plan")({
             setTimeout(() => reject(new Error("adapt-plan LLM deadline exceeded")), LLM_DEADLINE_MS),
           );
 
-          const { result } = await Promise.race([llmPromise, timeoutPromise]);
-          return Response.json({ plan: result.plan, cost_usd: result.cost_usd });
+          const { result, model } = await Promise.race([llmPromise, timeoutPromise]);
+          return Response.json({ plan: result.plan, cost_usd: result.cost_usd, _model_used: model });
         } catch (e) {
           console.error("adapt-plan failed:", e);
-          return Response.json({ plan: toOutput(FIXTURE_PLAN), cost_usd: 0 });
+          const msg = e instanceof Error ? e.message : String(e);
+          return Response.json({ plan: toOutput(FIXTURE_PLAN), cost_usd: 0, _error: msg.slice(0, 200) });
         }
       },
     },
