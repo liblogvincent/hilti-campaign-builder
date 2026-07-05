@@ -2052,29 +2052,31 @@ function AgentPanel({
 
   return (
     <aside className="workflowAgent">
-      <div className="agentIdentity">
-        <div className="agentAvatar"><Bot size={15} /></div>
-        <div>
-          <strong>Panda</strong>
-          <small>{agentLabel}</small>
+      <div className="agentShellTop">
+        <div className="agentIdentity">
+          <div className="agentAvatar"><Bot size={15} /></div>
+          <div>
+            <strong>Panda</strong>
+            <small>{agentLabel} agent</small>
+          </div>
+          <span className={busy ? "agentPulse running" : "agentPulse"} title={busy ? "Running" : "Ready"} />
         </div>
-        <span className={busy ? "agentPulse running" : "agentPulse"} title={busy ? "Running" : "Ready"} />
-      </div>
 
-      <div className="agentBrief">
-        <small>System context</small>
-        <p>{subtitle}</p>
-      </div>
-
-      {suggestions.length > 0 && (
-        <div className="agentSuggestions">
-          {suggestions.map((suggestion) => (
-            <button key={suggestion.label} onClick={() => onAgentInputChange(suggestion.prompt)}>
-              <Sparkles size={14} /> {suggestion.label}
-            </button>
-          ))}
+        <div className="agentBrief">
+          <small>Context</small>
+          <p>{subtitle}</p>
         </div>
-      )}
+
+        {suggestions.length > 0 && (
+          <div className="agentSuggestions">
+            {suggestions.map((suggestion) => (
+              <button key={suggestion.label} onClick={() => onAgentInputChange(suggestion.prompt)}>
+                <Sparkles size={13} /> {suggestion.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="messages compactMessages">
         {messages.length === 0 && (
@@ -2120,13 +2122,16 @@ function AgentPanel({
         <textarea value={agentInput} onChange={(event) => onAgentInputChange(event.target.value)} placeholder="Ask Panda to plan, revise, or build..." />
         <div className="composerToolbar">
           <input ref={fileRef} type="file" multiple onChange={(event) => addAttachments(event.target.files)} />
-          <button title="Attach file" onClick={() => fileRef.current?.click()}><Plus size={15} /></button>
-          <button title="Use evidence"><Paperclip size={14} /></button>
-          <button title="Ask for ideas"><Sparkles size={14} /></button>
-          <span className="toolbarSpacer" />
-          <button className={mode === "Plan" ? "selected" : ""} onClick={() => onAgentInputChange(agentInput || "Plan the next best action for this workspace.")}>Plan</button>
-          <button className={mode === "Build" ? "selected" : ""} onClick={() => onAgentInputChange(agentInput || "Build the next gate-ready work object.")}>Build</button>
-          <select aria-label="Model placeholder" defaultValue="deepseek">
+          <div className="composerTools">
+            <button title="Attach file" onClick={() => fileRef.current?.click()}><Plus size={15} /></button>
+            <button title="Use evidence"><Paperclip size={14} /></button>
+            <button title="Ask for ideas"><Sparkles size={14} /></button>
+          </div>
+          <div className="composerModes">
+            <button className={mode === "Plan" ? "selected" : ""} onClick={() => onAgentInputChange(agentInput || "Plan the next best action for this workspace.")}>Plan</button>
+            <button className={mode === "Build" ? "selected" : ""} onClick={() => onAgentInputChange(agentInput || "Build the next gate-ready work object.")}>Build</button>
+          </div>
+          <select aria-label="Model placeholder" defaultValue="deepseek" title="Model">
             <option value="deepseek">DeepSeek</option>
             <option value="gemini">Gemini soon</option>
             <option value="creative">Creative soon</option>
