@@ -30,7 +30,7 @@ export const Route = createFileRoute("/api/adapt-plan")({
         // So there's no self-repair loop for adapt-plan — a single ~6s call
         // through 580ai returns a conformant, brief-specific plan well under
         // Vercel's ~10s function budget. The deadline is only a hang guard.
-        const LLM_DEADLINE_MS = 25_000;
+        const LLM_DEADLINE_MS = 55_000;
 
         try {
           const llmPromise = tryWithModelFallback(async (modelId) => {
