@@ -71,8 +71,12 @@ export function createAiGatewayProvider(
   });
 }
 
-/** Model priority: default → fallback. Tries each in order until one succeeds. */
-export const MODEL_PRIORITY = [process.env.LLM_MODEL || "claude-opus-4-8", "claude-sonnet-5"];
+const DEFAULT_MODEL_PRIORITY = ["deepseek-v4-pro", "deepseek-v4-flash"];
+
+/** Model priority: env override → 580ai-supported defaults. Tries each in order until one succeeds. */
+export const MODEL_PRIORITY = process.env.LLM_MODEL
+  ? [process.env.LLM_MODEL, ...DEFAULT_MODEL_PRIORITY.filter((model) => model !== process.env.LLM_MODEL)]
+  : DEFAULT_MODEL_PRIORITY;
 
 /** Try each model in MODEL_PRIORITY until one succeeds. Returns result + which model was used. */
 export async function tryWithModelFallback<T>(
