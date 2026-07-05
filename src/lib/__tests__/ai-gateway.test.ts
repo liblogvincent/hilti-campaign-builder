@@ -15,6 +15,6 @@ describe("resolveGatewayConfig", () => {
   });
 
   it("defaults to model IDs supported by the 580ai endpoint", () => {
-    expect(MODEL_PRIORITY).toEqual(["deepseek-v4-pro", "deepseek-v4-flash"]);
+    expect(MODEL_PRIORITY).toEqual(["deepseek-v4-flash", "deepseek-v4-pro"]);
   });
 });

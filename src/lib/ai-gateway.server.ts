@@ -71,7 +71,7 @@ export function createAiGatewayProvider(
   });
 }
 
-const DEFAULT_MODEL_PRIORITY = ["deepseek-v4-pro", "deepseek-v4-flash"];
+const DEFAULT_MODEL_PRIORITY = ["deepseek-v4-flash", "deepseek-v4-pro"];
 
 /** Model priority: env override → 580ai-supported defaults. Tries each in order until one succeeds. */
 export const MODEL_PRIORITY = process.env.LLM_MODEL
