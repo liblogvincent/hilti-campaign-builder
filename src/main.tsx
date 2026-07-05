@@ -2127,14 +2127,14 @@ function AgentPanel({
             <button title="Use evidence"><Paperclip size={14} /></button>
             <button title="Ask for ideas"><Sparkles size={14} /></button>
           </div>
-          <div className="composerModes">
+          <div className="composerModeToggle" role="group" aria-label="Agent work mode">
             <button className={mode === "Plan" ? "selected" : ""} onClick={() => onAgentInputChange(agentInput || "Plan the next best action for this workspace.")}>Plan</button>
             <button className={mode === "Build" ? "selected" : ""} onClick={() => onAgentInputChange(agentInput || "Build the next gate-ready work object.")}>Build</button>
           </div>
-          <select aria-label="Model placeholder" defaultValue="deepseek" title="Model">
-            <option value="deepseek">DeepSeek</option>
-            <option value="gemini">Gemini soon</option>
-            <option value="creative">Creative soon</option>
+          <select className="modelSelectCompact" aria-label="Model placeholder" defaultValue="deepseek" title="DeepSeek model">
+            <option value="deepseek">DS</option>
+            <option value="gemini">Gemini</option>
+            <option value="creative">Creative</option>
           </select>
           <button className="sendRound" onClick={onSendAgentMessage} disabled={busy || !agentInput.trim()}>
             {busy ? <RefreshCw className="spin" size={15} /> : <Send size={14} />}
