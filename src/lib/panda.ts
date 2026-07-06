@@ -925,8 +925,8 @@ export function campaignConversationKey(campaignId: string) {
   return `${campaignId}:shared`;
 }
 
-export function visibleWorkspaceMessages(shared: AgentMessage[], local: AgentMessage[]) {
-  return compactAgentMessages([...shared, ...local]);
+export function visibleWorkspaceMessages(_shared: AgentMessage[], local: AgentMessage[]) {
+  return compactAgentMessages(local);
 }
 
 export function compactAgentMessages<T extends { id: string; role: string; text: string }>(messages: T[]) {

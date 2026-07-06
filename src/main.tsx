@@ -284,7 +284,8 @@ function App() {
         body: JSON.stringify({
           ...context,
           question: text,
-          agent_scope: buildAgentScope(targetView)
+          agent_scope: buildAgentScope(targetView),
+          conversation_history: compactAgentMessages(workspaceAgentMessages[key] ?? []).slice(-6)
         })
       });
       const packet = (await response.json()) as PandaOrchestratorResponse;

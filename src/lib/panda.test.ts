@@ -206,7 +206,7 @@ describe("panda run model", () => {
     expect(campaignConversationKey("camp_te70")).toBe("camp_te70:shared");
   });
 
-  it("combines shared campaign conversation before workspace-specific agent history", () => {
+  it("keeps specialist workspace messages isolated from shared Home chat", () => {
     const shared = [
       { id: "brief", role: "user" as const, text: "Launch a campaign for TE60-22", timestamp: "2026-07-06T01:00:00.000Z" },
       { id: "home", role: "agent" as const, text: "Home Panda created the campaign brief.", timestamp: "2026-07-06T01:00:01.000Z" }
@@ -215,7 +215,7 @@ describe("panda run model", () => {
       { id: "local", role: "agent" as const, text: "Campaign Planning Panda is ready.", timestamp: "2026-07-06T01:00:02.000Z" }
     ];
 
-    expect(visibleWorkspaceMessages(shared, local).map((message) => message.id)).toEqual(["brief", "home", "local"]);
+    expect(visibleWorkspaceMessages(shared, local).map((message) => message.id)).toEqual(["local"]);
   });
 
   it("compacts agent messages by normalized role and text", () => {
@@ -226,6 +226,53 @@ describe("panda run model", () => {
     ];
 
     expect(compactAgentMessages(messages).map((message) => message.id)).toEqual(["b", "c"]);
+  });
+
+  it("uses distinct message keys per campaign and workspace", () => {
+    expect(workspaceAgentMessageKey("camp-1", "content-planning")).not.toBe(workspaceAgentMessageKey("camp-1", "content"));
+    expect(workspaceAgentMessageKey("camp-1", "content")).not.toBe(workspaceAgentMessageKey("camp-2", "content"));
+  });
+
+  it("keeps visible specialist messages local to the specialist", () => {
+    const shared = [{ id: "s", role: "user" as const, text: "global", timestamp: "now" }];
+    const local = [{ id: "l", role: "agent" as const, text: "local", timestamp: "now" }];
+    expect(visibleWorkspaceMessages(shared, local).map((m) => m.text)).toEqual(["local"]);
+  });
+
+  it("shares campaign context without leaking another workspace's rendered messages", () => {
+    const run = createDefaultRun();
+    const plan = campaignPlanForRun(run);
+    const planningObjects = campaignPlanningObjectsFromPlan(plan);
+    const contentRequirements = contentRequirementsFromPlan(plan);
+    const contentObjects = createContentWorkObjectsFromRequirements(contentRequirements);
+    const rolloutObjects = createRolloutWorkObjectsFromContent(contentObjects);
+    const packet = buildPandaContextPacket({
+      run,
+      currentView: "content-planning",
+      currentPhase: "content",
+      userRole: defaultUserRole,
+      campaignPlan: plan,
+      planningObjects,
+      contentRequirements,
+      contentObjects,
+      rolloutObjects
+    });
+
+    expect(packet.campaign_id).toBe("camp_04");
+    expect(packet.campaign_name).toBeTruthy();
+    expect(packet.brief).toBeTruthy();
+    expect(packet.summary).toBeTruthy();
+    expect(packet.phase).toBe("content");
+    expect(packet.current_gate).toBe("H2");
+    expect(packet.planning_objects.length).toBeGreaterThan(0);
+    expect(packet.content_requirements.length).toBeGreaterThan(0);
+    expect(packet.content_objects.length).toBeGreaterThan(0);
+    expect(packet.rollout_objects.length).toBeGreaterThan(0);
+    expect(packet.artifacts).toBeDefined();
+    expect(packet.gate_decisions).toBeDefined();
+    expect(packet.worklog).toBeDefined();
+    expect((packet as Record<string, unknown>).messages).toBeUndefined();
+    expect((packet as Record<string, unknown>).conversation_history).toBeUndefined();
   });
 
   it("builds a shared Panda campaign context packet for all agent surfaces", () => {
