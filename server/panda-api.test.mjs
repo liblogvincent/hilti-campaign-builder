@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { handleAgent, handleHealth, handleIntegrationPackage, handleOrchestrator, normalizeOrchestratorResponse } from "./panda-api.mjs";
+import * as aiTransport from "./ai-transport.mjs";
 import { callJsonAgent, resolveProviderConfig, parseJsonObject } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
 import { createAgentMessageEvent, createGateDecisionEvent, createObjectPatchEvent, createRuntimeEvent } from "./runtime-events.mjs";
@@ -307,6 +308,31 @@ describe("panda api handlers", () => {
     restoreEnvKey("DEEPSEEK_API_KEY", originalKey);
   });
 
+  it("keeps fixture orchestrator behavior when runtime mode is local", async () => {
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.PANDA_RUNTIME_MODE = "local";
+
+    const req = createRequest("POST", {
+      campaign_id: "camp_04",
+      question: "update markets to China, Japan, Australia",
+      agent_scope: { id: "campaign-planning-specialist", view: "campaign-planning" },
+    });
+    const res = createResponse();
+    await handleOrchestrator(req, res);
+    const body = JSON.parse(res.body);
+
+    expect(body.answer).toBeTruthy();
+    expect(body.mode).toBeTruthy();
+
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+  });
+
   it("persists a phase packet turn when Supabase runtime is enabled", async () => {
     const client = createFakeSupabaseClient({
       rpc: {
@@ -417,6 +443,141 @@ describe("panda api handlers", () => {
       }),
     ]);
 
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+  });
+
+  it("executes campaign plan updates through Supabase runtime actions", async () => {
+    const client = createFakeSupabaseClient({
+      campaign_plans: {
+        select: [
+          {
+            data: [
+              {
+                id: 11,
+                campaign_id: "camp_04",
+                version: 1,
+                name: "Initial plan",
+                hero_product: "Initial product",
+                markets: ["Germany"],
+                locales: ["de-DE"],
+                audience: ["Contractors"],
+                budget: "EUR 10k",
+                timeline: "Draft",
+                channels: [],
+                kpis: [],
+                assumptions: [],
+              },
+            ],
+            error: null,
+          },
+        ],
+        insert: [{ data: null, error: null }],
+      },
+      object_revisions: {
+        insert: [{ data: null, error: null }],
+      },
+      runtime_events: {
+        insert: [{ data: null, error: null }],
+      },
+      rpc: {
+        persist_agent_turn: [
+          {
+            data: {
+              thread_id: 71,
+              user_message_id: 301,
+              agent_message_id: 302,
+              runtime_event_id: "agent_message_03",
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+    createClientMock.mockReset();
+    createClientMock.mockReturnValue(client.client);
+
+    const callJsonAgentSpy = vi.spyOn(aiTransport, "callJsonAgent").mockResolvedValueOnce({
+      mode: "deepseek",
+      answer: "Plan updated.",
+      highlights: ["Campaign markets changed"],
+      suggested_actions: ["Review the updated plan"],
+      route: "Campaign Planning",
+      updates: [
+        {
+          action: "update_campaign_plan",
+          note: "Expand the plan to China, Japan, and Australia.",
+          payload: { markets: ["China", "Japan", "Australia"], locales: ["zh-CN", "ja-JP", "en-AU"] },
+        },
+      ],
+    });
+
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.PANDA_RUNTIME_MODE = "supabase";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    delete process.env.DEEPSEEK_API_KEY;
+
+    const res = createResponse();
+    await handleOrchestrator(
+      createRequest("POST", {
+        campaign_id: "camp_04",
+        question: "Update the campaign plan for APAC expansion.",
+        agent_scope: { id: "campaign-planning-specialist", view: "campaign-planning" },
+      }),
+      res,
+    );
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.mode).toBe("deepseek");
+    expect(body.updates).toEqual([
+      expect.objectContaining({
+        action: "update_campaign_plan",
+      }),
+    ]);
+    expect(body.events).toHaveLength(1);
+    expect(body.events[0]).toMatchObject({
+      type: "object_patch",
+      actor: "campaign-planning-specialist",
+    });
+    expect(client.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "rpc",
+          fn: "persist_agent_turn",
+        }),
+        expect.objectContaining({
+          table: "campaign_plans",
+          op: "select",
+          filters: [
+            ["eq", "campaign_id", "camp_04"],
+          ],
+        }),
+        expect.objectContaining({
+          table: "campaign_plans",
+          op: "insert",
+          payload: expect.objectContaining({
+            campaign_id: "camp_04",
+            version: 2,
+            updated_by: "campaign-planning-specialist",
+          }),
+        }),
+        expect.objectContaining({
+          table: "object_revisions",
+          op: "insert",
+        }),
+        expect.objectContaining({
+          table: "runtime_events",
+          op: "insert",
+        }),
+      ]),
+    );
+
+    callJsonAgentSpy.mockRestore();
     restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
     restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
     restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);

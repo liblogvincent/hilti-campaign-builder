@@ -9,7 +9,7 @@ const AGENTS = {
     id: "campaign-planning-specialist",
     label: "Campaign Planning Specialist",
     schemaName: "workspace.answer.v1",
-    allowedActions: ["update_planning_object", "summarize_h1_plan", "apply_leadership_feedback", "find_h1_gaps"],
+    allowedActions: ["update_campaign_plan", "update_planning_object", "summarize_h1_plan", "apply_leadership_feedback", "find_h1_gaps"],
   },
   "content-planning-specialist": {
     id: "content-planning-specialist",
@@ -47,6 +47,7 @@ const ROLE_TO_ID = {
 };
 
 const UPDATE_ACTIONS = new Set([
+  "update_campaign_plan",
   "update_planning_object",
   "update_content_requirements",
   "update_content_object",
@@ -58,7 +59,7 @@ function buildSystemPrompt(agent) {
   const isOrchestrator = agent.id === "home-orchestrator";
   const jsonShape = isOrchestrator
     ? `{"answer": string, "highlights": string[], "suggested_actions": string[], "route": string}`
-    : `{"answer": string, "highlights": string[], "suggested_actions": string[], "route": string, "updates": [{"action": "update_planning_object"|"update_content_requirements"|"update_content_object"|"update_rollout_lane", "note": string, "targetId": string, "status": string, "payload": object}]}`;
+    : `{"answer": string, "highlights": string[], "suggested_actions": string[], "route": string, "updates": [{"action": "update_campaign_plan"|"update_planning_object"|"update_content_requirements"|"update_content_object"|"update_rollout_lane", "note": string, "targetId": string, "status": string, "payload": object}]}`;
 
   const updatesGuidance = isOrchestrator
     ? ""

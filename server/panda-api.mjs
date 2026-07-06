@@ -1,9 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { callJsonAgent } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
+import { executeRuntimeAction } from "./object-runtime.mjs";
 import { persistAgentTurn } from "./agent-runtime.mjs";
 import { buildFallback, buildIntegrationPackage, buildOrchestratorAnswer } from "./panda-packets.mjs";
-import { createSupabaseServerClient } from "./supabase-client.mjs";
+import { createSupabaseServerClient, runtimeMode } from "./supabase-client.mjs";
 
 const systemPrompt = `You are Panda, a DeepSeek-backed campaign orchestration agent for Hilti Agentic E2E.
 Return only compact JSON. Ground your output in this product truth:
@@ -98,7 +99,8 @@ export async function handleOrchestrator(req, res) {
   const fallback = buildOrchestratorAnswer(payload);
   const campaignId = resolveCampaignId(payload);
   const workspace = resolveWorkspaceFromScope(payload.agent_scope, payload.current_view);
-  const supabase = createSupabaseServerClient();
+  const mode = runtimeMode();
+  const supabase = mode === "supabase" ? createSupabaseServerClient() : undefined;
 
   let result;
   try {
@@ -122,6 +124,17 @@ export async function handleOrchestrator(req, res) {
     result,
   });
   if (!persistence.ok) return sendJson(res, persistence.status, persistence.body);
+
+  const updateExecution = await executeOrchestratorUpdates({
+    mode,
+    supabase,
+    result,
+    campaignId,
+    workspace,
+    actor: agent.id,
+  });
+  if (!updateExecution.ok) return sendJson(res, updateExecution.status, updateExecution.body);
+  result = updateExecution.result;
 
   return sendJson(res, 200, result);
 }
@@ -199,6 +212,7 @@ function normalizeResponse(data, payload, mode) {
 }
 
 const ALLOWED_UPDATE_ACTIONS = new Set([
+  "update_campaign_plan",
   "update_planning_object",
   "update_content_requirements",
   "update_content_object",
@@ -392,4 +406,51 @@ function buildPersistenceFailureBody(result, error) {
     details,
     ...(typeof result.warning === "string" && result.warning.trim() ? { warning: result.warning } : {}),
   };
+}
+
+function buildUpdateFailureBody(result, error) {
+  const details = error instanceof Error ? error.message : "Durable runtime update execution failed";
+  return {
+    error: "Durable runtime update execution failed",
+    details,
+    ...(typeof result.warning === "string" && result.warning.trim() ? { warning: result.warning } : {}),
+  };
+}
+
+async function executeOrchestratorUpdates({ mode, supabase, result, campaignId, workspace, actor }) {
+  if (mode !== "supabase" || !supabase || !Array.isArray(result.updates) || result.updates.length === 0) {
+    return { ok: true, result };
+  }
+
+  try {
+    const executions = [];
+    for (const update of result.updates) {
+      const execution = await executeRuntimeAction({
+        action: update,
+        campaignId,
+        workspace,
+        actor,
+        supabase,
+      });
+      executions.push(execution);
+    }
+
+    const events = executions.flatMap((execution) => (Array.isArray(execution.events) ? execution.events : []));
+    const snapshots = executions.map((execution) => execution.snapshot).filter((snapshot) => snapshot !== undefined);
+
+    return {
+      ok: true,
+      result: {
+        ...result,
+        ...(events.length > 0 ? { events } : {}),
+        ...(snapshots.length > 0 ? { snapshot: snapshots[snapshots.length - 1] } : {}),
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 503,
+      body: buildUpdateFailureBody(result, error),
+    };
+  }
 }
