@@ -3,6 +3,7 @@ export function resolveProviderConfig(env = process.env) {
     const style = env.DEEPSEEK_API_STYLE || "openai";
     return {
       mode: "deepseek",
+      transport: env.PANDA_AI_TRANSPORT === "vercel-ai" ? "vercel-ai" : "fetch",
       style,
       baseUrl: env.DEEPSEEK_BASE_URL
         || (style === "anthropic" ? "https://api.deepseek.com/anthropic" : "https://api.deepseek.com"),
@@ -12,7 +13,7 @@ export function resolveProviderConfig(env = process.env) {
       apiKey: env.DEEPSEEK_API_KEY,
     };
   }
-  return { mode: "fixture" };
+  return { mode: "fixture", transport: "fixture" };
 }
 
 export function parseJsonObject(text, fallback) {
@@ -35,7 +36,9 @@ export async function callJsonAgent({ payload, systemPrompt, fallback, normalize
   const config = resolveProviderConfig(env);
   if (config.mode === "fixture") return { mode: "fixture", ...fallback };
 
-  const result = config.style === "anthropic"
+  const result = config.transport === "vercel-ai"
+    ? await callVercelAiSdk({ config, payload, systemPrompt })
+    : config.style === "anthropic"
     ? await callAnthropicStyle({ config, payload, systemPrompt, fetchImpl })
     : await callOpenAiStyle({ config, payload, systemPrompt, fetchImpl });
 
@@ -49,6 +52,22 @@ export async function callJsonAgent({ payload, systemPrompt, fallback, normalize
   }
 
   return normalized;
+}
+
+async function callVercelAiSdk({ config, payload, systemPrompt }) {
+  const { generateText } = await import("ai");
+  const { createOpenAI } = await import("@ai-sdk/openai");
+  const deepseek = createOpenAI({
+    apiKey: config.apiKey,
+    baseURL: `${config.baseUrl.replace(/\/$/, "")}/v1`,
+  });
+  const result = await generateText({
+    model: deepseek(config.model),
+    system: systemPrompt,
+    prompt: JSON.stringify(payload),
+    temperature: 0.2,
+  });
+  return { ok: true, text: result.text };
 }
 
 async function callOpenAiStyle({ config, payload, systemPrompt, fetchImpl }) {

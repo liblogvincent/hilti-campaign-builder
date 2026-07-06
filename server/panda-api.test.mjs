@@ -1,10 +1,27 @@
 import { Readable } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { handleAgent, handleHealth, handleIntegrationPackage, handleOrchestrator, normalizeOrchestratorResponse } from "./panda-api.mjs";
 import { callJsonAgent, resolveProviderConfig, parseJsonObject } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
 import { createAgentMessageEvent, createGateDecisionEvent, createObjectPatchEvent, createRuntimeEvent } from "./runtime-events.mjs";
 import { canUseSupabase, runtimeMode } from "./supabase-client.mjs";
+
+const { generateTextMock, createOpenAiMock } = vi.hoisted(() => ({
+  generateTextMock: vi.fn(async () => ({ text: '{"answer":"from-sdk"}' })),
+  createOpenAiMock: vi.fn((options) => {
+    const provider = (name) => `mock:${name}`;
+    provider.options = options;
+    return provider;
+  }),
+}));
+
+vi.mock("ai", () => ({
+  generateText: generateTextMock,
+}));
+
+vi.mock("@ai-sdk/openai", () => ({
+  createOpenAI: createOpenAiMock,
+}));
 
 describe("ai transport", () => {
   it("uses fixture mode when no provider key is available", () => {
@@ -42,6 +59,55 @@ describe("ai transport", () => {
     expect(config.style).toBe("anthropic");
     expect(config.baseUrl).toBe("https://api.deepseek.com/anthropic");
     expect(config.model).toBe("deepseek-v4-flash");
+  });
+
+  it("selects Vercel AI SDK transport when configured", () => {
+    const config = resolveProviderConfig({
+      PANDA_AI_TRANSPORT: "vercel-ai",
+      DEEPSEEK_API_KEY: "sk-test",
+      DEEPSEEK_BASE_URL: "https://api.deepseek.com",
+      DEEPSEEK_MODEL: "deepseek-chat",
+    });
+
+    expect(config.mode).toBe("deepseek");
+    expect(config.transport).toBe("vercel-ai");
+  });
+
+  it("uses the Vercel AI SDK path when transport is vercel-ai", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("fetch path should not be used");
+    });
+
+    const result = await callJsonAgent({
+      payload: { phase: "planning" },
+      systemPrompt: "Test prompt",
+      fallback: { answer: "fallback" },
+      normalize: (data, _payload, mode) => ({ mode, ...data, transport: "vercel-ai" }),
+      env: {
+        PANDA_AI_TRANSPORT: "vercel-ai",
+        DEEPSEEK_API_KEY: "sk-test",
+        DEEPSEEK_BASE_URL: "https://api.deepseek.com",
+        DEEPSEEK_MODEL: "deepseek-chat",
+      },
+      fetchImpl,
+    });
+
+    expect(createOpenAiMock).toHaveBeenCalledWith({
+      apiKey: "sk-test",
+      baseURL: "https://api.deepseek.com/v1",
+    });
+    expect(generateTextMock).toHaveBeenCalledWith({
+      model: "mock:deepseek-chat",
+      system: "Test prompt",
+      prompt: JSON.stringify({ phase: "planning" }),
+      temperature: 0.2,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      mode: "deepseek",
+      answer: "from-sdk",
+      transport: "vercel-ai",
+    });
   });
 
   it("allows explicit overrides for baseUrl and model regardless of style", () => {
