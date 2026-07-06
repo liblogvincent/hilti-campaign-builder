@@ -3,6 +3,13 @@ import { runtimeMode, canUseSupabase, createSupabaseServerClient } from "./supab
 import { assertRuntimeStatus, normalizeWorkspace } from "./runtime-schema.mjs";
 import { createCampaignSnapshotFromFixture, loadCampaignSnapshot } from "./campaign-runtime.mjs";
 import { executeRuntimeAction } from "./object-runtime.mjs";
+import {
+  appendAgentMessage,
+  appendAgentMessageToFixture,
+  loadAgentHistory,
+  loadAgentHistoryFromFixture,
+  persistRuntimeEvent,
+} from "./agent-runtime.mjs";
 import { createDefaultRun, campaignPlanForRun, campaignPlanningObjectsFromPlan, contentRequirementsFromPlan } from "../src/lib/panda.ts";
 
 describe("runtime mode", () => {
@@ -469,6 +476,171 @@ describe("runtime action executor", () => {
   });
 });
 
+describe("agent runtime messages", () => {
+  it("keeps specialist history scoped by workspace", () => {
+    const store = {};
+    appendAgentMessageToFixture(store, {
+      campaignId: "camp_04",
+      workspace: "campaign-planning",
+      agentId: "campaign-planning-specialist",
+      role: "user",
+      text: "update markets",
+    });
+    appendAgentMessageToFixture(store, {
+      campaignId: "camp_04",
+      workspace: "content",
+      agentId: "content-specialist",
+      role: "user",
+      text: "revise copy",
+    });
+
+    expect(
+      loadAgentHistoryFromFixture(store, {
+        campaignId: "camp_04",
+        workspace: "campaign-planning",
+        agentId: "campaign-planning-specialist",
+      }).map((m) => m.text),
+    ).toEqual(["update markets"]);
+  });
+
+  it("creates an isolated thread per campaign, workspace, and agent in Supabase mode", async () => {
+    const client = createFakeSupabaseClient({
+      agent_threads: {
+        select: [
+          { data: null, error: null },
+          { data: { id: 41, campaign_id: "camp_04", workspace: "campaign-planning", agent_id: "campaign-planning-specialist" }, error: null },
+        ],
+        insert: [{ data: { id: 41 }, error: null }],
+      },
+      agent_messages: {
+        insert: [
+          {
+            data: {
+              id: 100,
+              thread_id: 41,
+              role: "user",
+              text: "update markets",
+              model_mode: "deepseek",
+              created_at: "2026-07-06T00:00:05.000Z",
+            },
+            error: null,
+          },
+        ],
+        select: [
+          {
+            data: [
+              { id: 101, thread_id: 41, role: "agent", text: "campaigns updated", model_mode: "deepseek", created_at: "2026-07-06T00:00:06.000Z" },
+              { id: 100, thread_id: 41, role: "user", text: "update markets", model_mode: "deepseek", created_at: "2026-07-06T00:00:05.000Z" },
+            ],
+            error: null,
+          },
+        ],
+      },
+    });
+
+    const message = await appendAgentMessage({
+      campaignId: "camp_04",
+      workspace: "campaign-planning",
+      agentId: "campaign-planning-specialist",
+      role: "user",
+      text: "update markets",
+      modelMode: "deepseek",
+      supabase: client.client,
+    });
+
+    expect(message).toMatchObject({
+      thread_id: 41,
+      role: "user",
+      text: "update markets",
+      model_mode: "deepseek",
+    });
+
+    const history = await loadAgentHistory({
+      campaignId: "camp_04",
+      workspace: "campaign-planning",
+      agentId: "campaign-planning-specialist",
+      supabase: client.client,
+      limit: 12,
+    });
+
+    expect(history.map((row) => row.text)).toEqual(["update markets", "campaigns updated"]);
+    expect(client.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: "agent_threads",
+          op: "select",
+          filters: [
+            ["eq", "campaign_id", "camp_04"],
+            ["eq", "workspace", "campaign-planning"],
+            ["eq", "agent_id", "campaign-planning-specialist"],
+          ],
+        }),
+        expect.objectContaining({
+          table: "agent_threads",
+          op: "insert",
+          payload: expect.objectContaining({
+            campaign_id: "camp_04",
+            workspace: "campaign-planning",
+            agent_id: "campaign-planning-specialist",
+            visible_to_workspace: true,
+            owner_id: null,
+          }),
+        }),
+        expect.objectContaining({
+          table: "agent_messages",
+          op: "insert",
+          payload: expect.objectContaining({
+            thread_id: 41,
+            role: "user",
+            text: "update markets",
+            model_mode: "deepseek",
+            owner_id: null,
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("persists runtime events with lowercase runtime columns", async () => {
+    const client = createFakeSupabaseClient({
+      runtime_events: {
+        insert: [{ data: null, error: null }],
+      },
+    });
+
+    await persistRuntimeEvent({
+      event: {
+        id: "agent_message_01",
+        campaignId: "camp_04",
+        workspace: "campaign-planning",
+        type: "agent_message",
+        actor: "campaign-planning-specialist",
+        ownerId: "user-01",
+        payload: { text: "update markets" },
+        timestamp: "2026-07-06T00:00:07.000Z",
+      },
+      supabase: client.client,
+    });
+
+    expect(client.operations).toEqual([
+      expect.objectContaining({
+        table: "runtime_events",
+        op: "insert",
+        payload: {
+          id: "agent_message_01",
+          campaign_id: "camp_04",
+          workspace: "campaign-planning",
+          type: "agent_message",
+          actor: "campaign-planning-specialist",
+          owner_id: "user-01",
+          payload: { text: "update markets" },
+          created_at: "2026-07-06T00:00:07.000Z",
+        },
+      }),
+    ]);
+  });
+});
+
 function createFakeSupabaseClient(scripts = {}) {
   const operations = [];
   const tables = new Map(Object.entries(scripts));
@@ -493,7 +665,6 @@ function createFakeQueryBuilder({ table, operations, scripts }) {
 
   const builder = {
     select(columns = "*") {
-      query.op = "select";
       query.columns = columns;
       return builder;
     },
@@ -535,7 +706,11 @@ function createFakeQueryBuilder({ table, operations, scripts }) {
     },
     single() {
       operations.push(snapshotOperation(query));
-      return Promise.resolve(resolveScriptResult({ table, op: "select", scripts }));
+      return Promise.resolve(resolveScriptResult({ table, op: query.op, scripts }));
+    },
+    maybeSingle() {
+      operations.push(snapshotOperation(query));
+      return Promise.resolve(resolveScriptResult({ table, op: query.op, scripts }));
     },
     then(resolve, reject) {
       operations.push(snapshotOperation(query));
