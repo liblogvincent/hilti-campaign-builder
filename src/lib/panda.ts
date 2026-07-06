@@ -89,6 +89,7 @@ export type PandaOrchestratorResponse = {
   highlights: string[];
   suggested_actions: string[];
   route?: string;
+  updates?: ServerSpecialistUpdate[];
 };
 
 export type CampaignRun = {
@@ -139,6 +140,20 @@ export type SpecialistAgentResponse = {
   updates: SpecialistAgentUpdate[];
   suggested_actions: string[];
   route?: AppView;
+};
+
+export type ServerSpecialistUpdateAction =
+  | "update_planning_object"
+  | "update_content_requirements"
+  | "update_content_object"
+  | "update_rollout_lane";
+
+export type ServerSpecialistUpdate = {
+  action: ServerSpecialistUpdateAction;
+  targetId?: string;
+  status?: WorkObjectStatus;
+  note: string;
+  payload?: Record<string, unknown>;
 };
 
 export type CampaignWorkspace = {
@@ -1151,6 +1166,49 @@ export function draftSpecialistAgentResponse(view: AppView, question: string, co
     suggested_actions: ["Review workspace status", "Ask Panda for the next scoped action"],
     route: view
   };
+}
+
+const ALLOWED_SERVER_UPDATE_ACTIONS: Set<string> = new Set([
+  "update_planning_object",
+  "update_content_requirements",
+  "update_content_object",
+  "update_rollout_lane",
+]);
+
+const ALLOWED_SERVER_UPDATE_STATUSES: Set<string> = new Set([
+  "draft",
+  "in-review",
+  "approved",
+  "revision-requested",
+  "blocked",
+]);
+
+export function normalizeServerUpdates(updates: unknown): ServerSpecialistUpdate[] {
+  if (!Array.isArray(updates)) return [];
+  return updates
+    .filter(
+      (update): update is Record<string, unknown> =>
+        update !== null &&
+        typeof update === "object" &&
+        typeof (update as Record<string, unknown>).action === "string" &&
+        ALLOWED_SERVER_UPDATE_ACTIONS.has((update as Record<string, unknown>).action as string) &&
+        typeof (update as Record<string, unknown>).note === "string" &&
+        ((update as Record<string, unknown>).note as string).trim().length > 0,
+    )
+    .slice(0, 8)
+    .map((update) => ({
+      action: update.action as ServerSpecialistUpdateAction,
+      note: (update.note as string).trim().slice(0, 500),
+      targetId: typeof update.targetId === "string" ? (update.targetId as string).trim().slice(0, 128) : undefined,
+      status:
+        typeof update.status === "string" && ALLOWED_SERVER_UPDATE_STATUSES.has(update.status)
+          ? (update.status as WorkObjectStatus)
+          : undefined,
+      payload:
+        update.payload !== null && typeof update.payload === "object" && !Array.isArray(update.payload)
+          ? (update.payload as Record<string, unknown>)
+          : undefined,
+    }));
 }
 
 export function agentStackItems() {

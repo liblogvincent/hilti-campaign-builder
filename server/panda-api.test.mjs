@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { handleAgent, handleHealth, handleIntegrationPackage, handleOrchestrator } from "./panda-api.mjs";
+import { handleAgent, handleHealth, handleIntegrationPackage, handleOrchestrator, normalizeOrchestratorResponse } from "./panda-api.mjs";
 import { callJsonAgent, resolveProviderConfig, parseJsonObject } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
 
@@ -189,6 +189,130 @@ describe("panda api handlers", () => {
     const body = JSON.parse(res.body);
     expect(res.status).toBe(200);
     expect(body.artifacts.some((artifact) => artifact.type === "publish-manifest")).toBe(true);
+  });
+});
+
+describe("orchestrator response normalization", () => {
+  const basePayload = { question: "test", phase: "planning" };
+
+  it("normalizes valid specialist updates", () => {
+    const result = normalizeOrchestratorResponse(
+      {
+        answer: "Updated.",
+        updates: [
+          { action: "update_content_requirements", note: "Add MOCN-only content.", payload: { audience: "MOCN" } },
+        ],
+      },
+      basePayload,
+      "deepseek",
+    );
+    expect(result.updates).toHaveLength(1);
+    expect(result.updates[0]).toEqual({
+      action: "update_content_requirements",
+      note: "Add MOCN-only content.",
+      targetId: undefined,
+      status: undefined,
+      payload: { audience: "MOCN" },
+    });
+  });
+
+  it("removes updates with disallowed actions", () => {
+    const result = normalizeOrchestratorResponse(
+      {
+        answer: "Nope.",
+        updates: [
+          { action: "approve_gate", note: "Approve H1" },
+          { action: "update_planning_object", note: "Valid update for campaign planning." },
+        ],
+      },
+      basePayload,
+      "deepseek",
+    );
+    expect(result.updates).toHaveLength(1);
+    expect(result.updates[0].action).toBe("update_planning_object");
+  });
+
+  it("removes updates missing a note", () => {
+    const result = normalizeOrchestratorResponse(
+      {
+        answer: "Missing note.",
+        updates: [
+          { action: "update_content_requirements" },
+          { action: "update_rollout_lane", note: "" },
+          { action: "update_content_object", note: "Valid note." },
+        ],
+      },
+      basePayload,
+      "deepseek",
+    );
+    expect(result.updates).toHaveLength(1);
+    expect(result.updates[0].action).toBe("update_content_object");
+  });
+
+  it("limits to 8 updates", () => {
+    const manyUpdates = Array.from({ length: 12 }, (_, i) => ({
+      action: "update_content_requirements",
+      note: `Update ${i + 1}`,
+    }));
+    const result = normalizeOrchestratorResponse(
+      { answer: "Limited.", updates: manyUpdates },
+      basePayload,
+      "deepseek",
+    );
+    expect(result.updates).toHaveLength(8);
+  });
+
+  it("omits the updates key when the array is empty", () => {
+    const result = normalizeOrchestratorResponse(
+      { answer: "No updates.", updates: [] },
+      basePayload,
+      "deepseek",
+    );
+    expect(result).not.toHaveProperty("updates");
+  });
+
+  it("omits the updates key when all updates are invalid", () => {
+    const result = normalizeOrchestratorResponse(
+      {
+        answer: "All invalid.",
+        updates: [
+          { action: "bad_action", note: "nope" },
+          { note: "missing action" },
+          null,
+        ],
+      },
+      basePayload,
+      "deepseek",
+    );
+    expect(result).not.toHaveProperty("updates");
+  });
+
+  it("preserves status when it is a valid work object status", () => {
+    const result = normalizeOrchestratorResponse(
+      {
+        answer: "Status included.",
+        updates: [
+          { action: "update_planning_object", note: "Draft objective.", status: "revision-requested" },
+        ],
+      },
+      basePayload,
+      "deepseek",
+    );
+    expect(result.updates[0].status).toBe("revision-requested");
+  });
+
+  it("strips invalid status values", () => {
+    const result = normalizeOrchestratorResponse(
+      {
+        answer: "Bad status.",
+        updates: [
+          { action: "update_planning_object", note: "Bad status.", status: "published" },
+        ],
+      },
+      basePayload,
+      "deepseek",
+    );
+    expect(result.updates[0].status).toBeUndefined();
   });
 });
 

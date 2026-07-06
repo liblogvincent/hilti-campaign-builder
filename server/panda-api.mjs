@@ -164,12 +164,51 @@ function normalizeResponse(data, payload, mode) {
   };
 }
 
-function normalizeOrchestratorResponse(data, payload, mode) {
+const ALLOWED_UPDATE_ACTIONS = new Set([
+  "update_planning_object",
+  "update_content_requirements",
+  "update_content_object",
+  "update_rollout_lane",
+]);
+
+const ALLOWED_WORK_OBJECT_STATUSES = new Set([
+  "draft",
+  "in-review",
+  "approved",
+  "revision-requested",
+  "blocked",
+]);
+
+function normalizeUpdates(updates) {
+  if (!Array.isArray(updates)) return [];
+  return updates
+    .filter(
+      (update) =>
+        update &&
+        typeof update === "object" &&
+        typeof update.action === "string" &&
+        ALLOWED_UPDATE_ACTIONS.has(update.action) &&
+        typeof update.note === "string" &&
+        update.note.trim().length > 0,
+    )
+    .slice(0, 8)
+    .map((update) => ({
+      action: update.action,
+      note: update.note.trim().slice(0, 500),
+      targetId: typeof update.targetId === "string" ? update.targetId.trim().slice(0, 128) : undefined,
+      status: typeof update.status === "string" && ALLOWED_WORK_OBJECT_STATUSES.has(update.status) ? update.status : undefined,
+      payload: update.payload && typeof update.payload === "object" && !Array.isArray(update.payload) ? update.payload : undefined,
+    }));
+}
+
+export function normalizeOrchestratorResponse(data, payload, mode) {
   const fallback = buildOrchestratorAnswer(payload);
   const merged = {
     ...fallback,
     ...(data && typeof data === "object" ? data : {}),
   };
+
+  const updates = normalizeUpdates(merged.updates);
 
   return {
     mode,
@@ -180,6 +219,7 @@ function normalizeOrchestratorResponse(data, payload, mode) {
       ? merged.suggested_actions.filter((item) => typeof item === "string").slice(0, 6)
       : fallback.suggested_actions,
     route: typeof merged.route === "string" ? merged.route : fallback.route,
+    ...(updates.length > 0 ? { updates } : {}),
   };
 }
 

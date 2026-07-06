@@ -46,14 +46,30 @@ const ROLE_TO_ID = {
   "optimize-specialist": "optimize-specialist",
 };
 
+const UPDATE_ACTIONS = new Set([
+  "update_planning_object",
+  "update_content_requirements",
+  "update_content_object",
+  "update_rollout_lane",
+]);
+
 function buildSystemPrompt(agent) {
   const allowed = agent.allowedActions.join(", ");
+  const isOrchestrator = agent.id === "home-orchestrator";
+  const jsonShape = isOrchestrator
+    ? `{"answer": string, "highlights": string[], "suggested_actions": string[], "route": string}`
+    : `{"answer": string, "highlights": string[], "suggested_actions": string[], "route": string, "updates": [{"action": "update_planning_object"|"update_content_requirements"|"update_content_object"|"update_rollout_lane", "note": string, "targetId": string, "status": string, "payload": object}]}`;
+
+  const updatesGuidance = isOrchestrator
+    ? ""
+    : `\nWhen your answer should change workspace objects, include an "updates" array. Each update must have an "action" from: ${[...UPDATE_ACTIONS].join(", ")}. Include a "note" explaining the change. Limit to 8 updates. Do not fabricate updates for unchanged objects.`;
+
   return `You are Panda, the ${agent.label} for Hilti Agentic E2E.
 Your role: ${agent.label}.
 Allowed actions: ${allowed}.
-Forbidden: do not approve gates, do not authorize spend, do not publish. H3 is the human publish/spend gate.
+Forbidden: do not approve gates, do not authorize spend, do not publish. H3 is the human publish/spend gate.${updatesGuidance}
 Return only compact JSON with this shape:
-{"answer": string, "highlights": string[], "suggested_actions": string[], "route": string}`;
+${jsonShape}`;
 }
 
 for (const agent of Object.values(AGENTS)) {

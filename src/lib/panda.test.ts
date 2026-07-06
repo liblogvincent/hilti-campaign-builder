@@ -35,6 +35,7 @@ import {
   isHomeCampaignCreationIntent,
   navigationItems,
   nextPhase,
+  normalizeServerUpdates,
   restoreAppView,
   phaseIndex,
   progressForCampaign,
@@ -752,6 +753,79 @@ describe("panda run model", () => {
     expect(readiness.blocked).toBe(0);
     expect(readiness.lanes).toContain("Contentful");
     expect(readiness.sourceObjects).toBe(content.length);
+  });
+
+  it("normalizes valid server specialist updates", () => {
+    const result = normalizeServerUpdates([
+      { action: "update_content_requirements", note: "Add MOCN-only content.", payload: { audience: "MOCN" } },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      action: "update_content_requirements",
+      note: "Add MOCN-only content.",
+      targetId: undefined,
+      status: undefined,
+      payload: { audience: "MOCN" },
+    });
+  });
+
+  it("filters out server updates with disallowed actions", () => {
+    const result = normalizeServerUpdates([
+      { action: "publish_campaign", note: "Publish now." },
+      { action: "update_planning_object", note: "Valid planning update." },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].action).toBe("update_planning_object");
+  });
+
+  it("filters out server updates missing a note", () => {
+    const result = normalizeServerUpdates([
+      { action: "update_content_requirements" },
+      { action: "update_rollout_lane", note: "" },
+      { action: "update_content_object", note: "Valid note." },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].action).toBe("update_content_object");
+  });
+
+  it("limits server updates to 8", () => {
+    const manyUpdates = Array.from({ length: 12 }, (_, i) => ({
+      action: "update_content_requirements" as const,
+      note: `Update ${i + 1}`,
+    }));
+    const result = normalizeServerUpdates(manyUpdates);
+    expect(result).toHaveLength(8);
+  });
+
+  it("returns an empty array for non-array input", () => {
+    expect(normalizeServerUpdates(null)).toEqual([]);
+    expect(normalizeServerUpdates(undefined)).toEqual([]);
+    expect(normalizeServerUpdates("not an array")).toEqual([]);
+    expect(normalizeServerUpdates({ updates: [] })).toEqual([]);
+  });
+
+  it("returns an empty array when all updates are invalid", () => {
+    const result = normalizeServerUpdates([
+      { action: "bad_action", note: "nope" },
+      { note: "missing action" },
+      null,
+    ]);
+    expect(result).toEqual([]);
+  });
+
+  it("trims notes to 500 characters", () => {
+    const longNote = "x".repeat(600);
+    const result = normalizeServerUpdates([
+      { action: "update_planning_object", note: longNote },
+    ]);
+    expect(result[0].note).toHaveLength(500);
+  });
+
+  it("strips invalid server update status values", () => {
+    const result = normalizeServerUpdates([
+      { action: "update_planning_object", note: "Bad status.", status: "published" },
+    ]);
+    expect(result[0].status).toBeUndefined();
   });
 
   it("summarizes skills as knowledge and integration capability groups", () => {

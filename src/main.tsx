@@ -63,6 +63,7 @@ import {
   GateId,
   navigationItems,
   nextPhase,
+  normalizeServerUpdates,
   PandaAgentResponse,
   PandaArtifact,
   PandaOrchestratorResponse,
@@ -75,6 +76,7 @@ import {
   RolloutWorkObject,
   rolloutWorkspaceReadiness,
   restoreAppView,
+  ServerSpecialistUpdate,
   skillHubSummary,
   skillCapabilityItems,
   SkillCapability,
@@ -289,9 +291,22 @@ function App() {
         })
       });
       const packet = (await response.json()) as PandaOrchestratorResponse;
+      const serverUpdates = normalizeServerUpdates(packet.updates);
+      let serverApplied = false;
+      for (const update of serverUpdates) {
+        if (update.action === "update_planning_object" && targetView === "campaign-planning") {
+          serverApplied = applyCampaignPlanningInstructionToWorkspace(update.note) || serverApplied;
+        }
+        if (update.action === "update_content_requirements" && targetView === "content-planning") {
+          serverApplied = applyContentPlanningInstructionToWorkspace(update.note) || serverApplied;
+        }
+      }
+      const answerSuffix = serverApplied ? "\n\nWorkspace objects were updated from this answer." : "";
       appendWorkspaceAgentMessage(targetView, {
         role: "agent",
-        text: packet.warning ? `${packet.answer}\n\nNote: ${packet.warning}` : packet.answer
+        text: packet.warning
+          ? `${packet.answer}\n\nNote: ${packet.warning}${answerSuffix}`
+          : `${packet.answer}${answerSuffix}`
       });
     } catch (error) {
       appendWorkspaceAgentMessage(targetView, {
