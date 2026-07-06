@@ -52,6 +52,6 @@ Done.
 ## Task 8 Runtime Snapshot Stale Evidence Fix Report
 - Files changed: `src/main.tsx`, `src/lib/panda.ts`, `src/lib/panda.test.ts`, `.superpowers/sdd/task-8-report.md`
 - Tests run: `npm test -- src/lib/panda.test.ts` - passed; `npm test` - passed; `npm run build` - passed
-- Commit hash: pending
+- Commit hash: `1cc09a3`
 - Self-review: a later empty or malformed runtime snapshot now clears the active campaign runtime snapshot and evidence flags without deleting local overlays, so stale evidence-backed snapshots stop hydrating the UI. Runtime snapshot ids now accept prototype campaign ids only, falling back to the active campaign id for malformed strings.
 - Concerns: campaign id validation is intentionally prototype-scoped to `camp_*` ids; broaden it if the backend switches to UUID campaign ids.
