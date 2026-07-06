@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { callJsonAgent } from "./ai-transport.mjs";
 import { buildFallback, buildIntegrationPackage, buildOrchestratorAnswer } from "./panda-packets.mjs";
 
 const systemPrompt = `You are Panda, a DeepSeek-backed campaign orchestration agent for Hilti Agentic E2E.
@@ -55,20 +56,14 @@ export async function handleAgent(req, res) {
   const payload = await readJson(req);
   const fallback = buildFallback(payload);
 
-  if (!process.env.DEEPSEEK_API_KEY) {
-    return sendJson(res, 200, { mode: "fixture", ...fallback });
-  }
-
   try {
-    const apiResult = process.env.DEEPSEEK_API_STYLE === "anthropic"
-      ? await callAnthropicStyle(payload)
-      : await callOpenAiStyle(payload);
-
-    if (!apiResult.ok) {
-      return sendJson(res, 200, { mode: "fixture", warning: apiResult.warning, ...fallback });
-    }
-
-    return sendJson(res, 200, normalizeResponse(apiResult.data, payload, "deepseek"));
+    const result = await callJsonAgent({
+      payload,
+      systemPrompt,
+      fallback,
+      normalize: (data, _payload, mode) => normalizeResponse(data, payload, mode),
+    });
+    return sendJson(res, 200, result);
   } catch (error) {
     return sendJson(res, 200, { mode: "fixture", warning: error instanceof Error ? error.message : "Agent call failed", ...fallback });
   }
@@ -82,20 +77,14 @@ export async function handleOrchestrator(req, res) {
   const payload = await readJson(req);
   const fallback = buildOrchestratorAnswer(payload);
 
-  if (!process.env.DEEPSEEK_API_KEY) {
-    return sendJson(res, 200, { mode: "fixture", ...fallback });
-  }
-
   try {
-    const apiResult = process.env.DEEPSEEK_API_STYLE === "anthropic"
-      ? await callAnthropicStyle(payload, orchestratorPrompt)
-      : await callOpenAiStyle(payload, orchestratorPrompt);
-
-    if (!apiResult.ok) {
-      return sendJson(res, 200, { mode: "fixture", warning: apiResult.warning, ...fallback });
-    }
-
-    return sendJson(res, 200, normalizeOrchestratorResponse(apiResult.data, payload, "deepseek"));
+    const result = await callJsonAgent({
+      payload,
+      systemPrompt: orchestratorPrompt,
+      fallback,
+      normalize: (data, _payload, mode) => normalizeOrchestratorResponse(data, payload, mode),
+    });
+    return sendJson(res, 200, result);
   } catch (error) {
     return sendJson(res, 200, { mode: "fixture", warning: error instanceof Error ? error.message : "Orchestrator call failed", ...fallback });
   }
@@ -121,96 +110,6 @@ export function loadEnv(path) {
   for (const line of lines) {
     const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
     if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
-  }
-}
-
-async function callOpenAiStyle(payload, prompt = systemPrompt) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Number(process.env.DEEPSEEK_TIMEOUT_MS || 20000));
-  const response = await fetch(`${process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com"}/chat/completions`, {
-    method: "POST",
-    signal: controller.signal,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
-      response_format: { type: "json_object" },
-      temperature: 0.25,
-      messages: [
-        { role: "system", content: prompt },
-        { role: "user", content: JSON.stringify(payload) },
-      ],
-    }),
-  });
-  clearTimeout(timeout);
-
-  if (!response.ok) {
-    const text = await response.text();
-    return { ok: false, warning: `DeepSeek ${response.status}: ${text.slice(0, 160)}` };
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content || "{}";
-  return { ok: true, data: parseJsonObject(content, payload) };
-}
-
-async function callAnthropicStyle(payload, prompt = systemPrompt) {
-  const baseUrl = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/anthropic";
-  const endpoint = baseUrl.endsWith("/v1/messages") ? baseUrl : `${baseUrl.replace(/\/$/, "")}/v1/messages`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Number(process.env.DEEPSEEK_TIMEOUT_MS || 20000));
-  const response = await fetch(endpoint, {
-    method: "POST",
-    signal: controller.signal,
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.DEEPSEEK_API_KEY,
-      Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
-      max_tokens: 1800,
-      temperature: 0.25,
-      system: prompt,
-      messages: [{ role: "user", content: JSON.stringify(payload) }],
-    }),
-  });
-  clearTimeout(timeout);
-
-  if (!response.ok) {
-    const text = await response.text();
-    return { ok: false, warning: `DeepSeek ${response.status}: ${text.slice(0, 160)}` };
-  }
-
-  const data = await response.json();
-  const text = Array.isArray(data.content)
-    ? data.content.map((block) => block.text || "").join("")
-    : data.content || "{}";
-  return { ok: true, data: parseJsonObject(text, payload) };
-}
-
-function parseJsonObject(text, payload) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    const match = String(text).match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch {
-        // Fall through to safe normalization.
-      }
-    }
-
-    const fallback = buildFallback(payload);
-    return {
-      ...fallback,
-      warning: "DeepSeek returned malformed JSON; Panda normalized it into a safe gate packet.",
-      summary: fallback.summary,
-    };
   }
 }
 
