@@ -71,5 +71,5 @@ Minor
 - Files changed: `server/object-runtime.mjs`, `server/runtime-api.test.mjs`, `server/panda-api.test.mjs`, `supabase/migrations/202607060001_durable_panda_runtime.sql`, `.superpowers/sdd/final-review-fix-report.md`
 - Fix: moved Supabase gate decision persistence into service-role-only `public.persist_gate_decision(...)` RPC so gate decision insert, campaign phase advancement, and runtime event write happen in one database transaction. The RPC locks the campaign row and advances only when the campaign is still on the approved gate, preventing retry double-advance.
 - Tests run: `npm test -- server/runtime-api.test.mjs` - PASS; `npm test -- server/panda-api.test.mjs` - PASS; `npm test` - PASS (150 tests); `npm run build` - PASS
-- Commit hash: pending
+- Commit hash: `23f8196`
 - Concerns: no live Supabase migration smoke test was run in this environment.
