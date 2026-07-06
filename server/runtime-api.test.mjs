@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runtimeMode, canUseSupabase, createSupabaseServerClient } from "./supabase-client.mjs";
 import { assertRuntimeStatus, normalizeWorkspace } from "./runtime-schema.mjs";
 import { createCampaignSnapshotFromFixture, loadCampaignSnapshot } from "./campaign-runtime.mjs";
+import { executeRuntimeAction } from "./object-runtime.mjs";
 import { createDefaultRun, campaignPlanForRun, campaignPlanningObjectsFromPlan, contentRequirementsFromPlan } from "../src/lib/panda.ts";
 
 describe("runtime mode", () => {
@@ -202,5 +203,36 @@ describe("campaign snapshot runtime", () => {
       campaignId: "camp_04",
       timestamp: "2026-07-06T00:00:04.000Z",
     });
+  });
+});
+
+describe("runtime action executor", () => {
+  it("updates plan markets in fixture mode and records a revision", async () => {
+    const run = createDefaultRun();
+    const plan = campaignPlanForRun(run);
+    const snapshot = createCampaignSnapshotFromFixture({
+      run,
+      plan,
+      planningObjects: campaignPlanningObjectsFromPlan(plan),
+      contentRequirements: contentRequirementsFromPlan(plan),
+    });
+
+    const result = await executeRuntimeAction({
+      action: {
+        action: "update_campaign_plan",
+        targetId: "campaign-plan",
+        note: "Update markets to China, Japan, and Australia.",
+        payload: { markets: ["China", "Japan", "Australia"], locales: ["zh-CN", "ja-JP", "en-AU"] },
+      },
+      campaignId: run.campaignId,
+      workspace: "campaign-planning",
+      actor: "campaign-planning-specialist",
+      fixtureSnapshot: snapshot,
+    });
+
+    expect(result.snapshot.plan.markets).toEqual(["China", "Japan", "Australia"]);
+    expect(result.snapshot.plan.locales).toEqual(["zh-CN", "ja-JP", "en-AU"]);
+    expect(result.revisions).toHaveLength(1);
+    expect(result.events[0].type).toBe("object_patch");
   });
 });

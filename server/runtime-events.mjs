@@ -41,6 +41,30 @@ export function createObjectPatchEvent({ campaignId, workspace, objectId, action
   });
 }
 
+export function createObjectRevisionRecord({
+  campaignId,
+  objectId,
+  objectType,
+  action,
+  before,
+  after,
+  rationale,
+  actor = "panda-agent",
+  createdAt = new Date().toISOString(),
+}) {
+  return {
+    campaignId,
+    objectId: typeof objectId === "string" ? objectId.trim().slice(0, 128) : "unknown-object",
+    objectType: typeof objectType === "string" ? objectType.trim().slice(0, 64) : "unknown-object-type",
+    action: typeof action === "string" ? action.trim().slice(0, 128) : "update",
+    before,
+    after,
+    rationale: typeof rationale === "string" ? rationale.trim().slice(0, 500) : "",
+    actor: typeof actor === "string" && actor.trim() ? actor.trim().slice(0, 128) : "panda-agent",
+    createdAt,
+  };
+}
+
 export function createGateDecisionEvent({ campaignId, gateId, decision, reviewer, comment = "" }) {
   return createRuntimeEvent({
     type: "gate_decision",
