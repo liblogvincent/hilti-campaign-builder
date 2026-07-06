@@ -3380,6 +3380,33 @@ footer {
   font-size: 24px;
 }
 
+.runtimeTracePanel {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 16px;
+}
+
+.traceEvent {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.traceEvent:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.traceEvent p {
+  margin: 0;
+  color: #444;
+  line-height: 1.45;
+}
+
 .planningObjectRow {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;

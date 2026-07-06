@@ -886,7 +886,7 @@ function App() {
               onOpenSkills={() => setView("skills")}
             />
           )}
-          {view === "progress" && <ProgressView run={run} completion={completion} onNavigate={setView} />}
+          {view === "progress" && <ProgressView run={run} completion={completion} events={runtimeSnapshot?.events ?? []} onNavigate={setView} />}
           {view === "skills" && <SkillsView />}
           {view === "content" && (
             <ContentWorkspace
@@ -917,6 +917,8 @@ function App() {
               planningObjects={planningObjects}
               planningReadiness={planningReadiness}
               contentRequirements={contentRequirements}
+              runtimeSnapshotHasVisibleEvidence={runtimeSnapshotHasVisibleEvidence}
+              runtimeEvents={runtimeSnapshot?.events ?? []}
               contentObjects={contentObjects}
               rolloutObjects={rolloutObjects}
               busy={busy || Boolean(workspaceAgentBusy[workflowAgentKey])}
@@ -1168,7 +1170,17 @@ function HomeLauncher({
   );
 }
 
-function ProgressView({ run, completion, onNavigate }: { run: CampaignRun; completion: number; onNavigate: (target: AppView) => void }) {
+function ProgressView({
+  run,
+  completion,
+  events,
+  onNavigate
+}: {
+  run: CampaignRun;
+  completion: number;
+  events: CampaignRuntimeSnapshot["events"];
+  onNavigate: (target: AppView) => void;
+}) {
   const progress = progressForCampaign(run, defaultUserRole);
   return (
     <div className="progressPage">
@@ -1230,6 +1242,8 @@ function ProgressView({ run, completion, onNavigate }: { run: CampaignRun; compl
           <TaskList tasks={progress.pandaTasks} onDetail={(task) => onNavigate(progressTaskDetailRoute(task))} />
         </Panel>
       </div>
+
+      <RuntimeTracePanel events={events} />
     </div>
   );
 }
@@ -1314,6 +1328,28 @@ function SkillCapabilityCard({ item }: { item: SkillCapability }) {
         {item.category === "knowledge" ? "Manage skill" : "Configure mock"}
       </button>
     </article>
+  );
+}
+
+function RuntimeTracePanel({ events }: { events: CampaignRuntimeSnapshot["events"] }) {
+  return (
+    <section className="runtimeTracePanel">
+      <div className="objectListHeader">
+        <small>Runtime trace</small>
+        <strong>Agent actions and audit trail</strong>
+      </div>
+      {events.length === 0 ? (
+        <p>No durable runtime events yet.</p>
+      ) : (
+        events.slice(0, 12).map((event) => (
+          <article key={event.id} className="traceEvent">
+            <small>{event.workspace} · {event.type}</small>
+            <strong>{event.actor}</strong>
+            <p>{typeof event.payload?.note === "string" ? event.payload.note : JSON.stringify(event.payload).slice(0, 140)}</p>
+          </article>
+        ))
+      )}
+    </section>
   );
 }
 
@@ -1530,6 +1566,8 @@ function WorkflowShell({
   planningObjects,
   planningReadiness,
   contentRequirements,
+  runtimeSnapshotHasVisibleEvidence,
+  runtimeEvents,
   contentObjects,
   rolloutObjects,
   busy,
@@ -1548,6 +1586,8 @@ function WorkflowShell({
   planningObjects: PlanningWorkObject[];
   planningReadiness: PlanningReadiness;
   contentRequirements: ContentRequirement[];
+  runtimeSnapshotHasVisibleEvidence: boolean;
+  runtimeEvents: CampaignRuntimeSnapshot["events"];
   contentObjects: ContentWorkObject[];
   rolloutObjects: RolloutWorkObject[];
   busy: boolean;
@@ -1606,6 +1646,7 @@ function WorkflowShell({
           objects={planningObjects}
           readiness={planningReadiness}
           requirements={contentRequirements}
+          events={runtimeEvents}
           runtimeSnapshotHasEvidence={runtimeSnapshotHasVisibleEvidence}
           onApplyFeedback={onApplyCampaignPlanningFeedback}
           onUpdate={onUpdatePlanningObject}
@@ -1660,6 +1701,7 @@ function CampaignPlanningWorkspace({
   objects,
   readiness,
   requirements,
+  events,
   runtimeSnapshotHasEvidence,
   onApplyFeedback,
   onUpdate
@@ -1668,6 +1710,7 @@ function CampaignPlanningWorkspace({
   objects: PlanningWorkObject[];
   readiness: PlanningReadiness;
   requirements: ContentRequirement[];
+  events: CampaignRuntimeSnapshot["events"];
   runtimeSnapshotHasEvidence: boolean;
   onApplyFeedback: (proposal: LeadershipFeedbackProposal) => void;
   onUpdate: (id: string, status: WorkObjectStatus, comment: string) => void;
@@ -1701,6 +1744,8 @@ function CampaignPlanningWorkspace({
       </section>
 
       <PlanPacketTabs active={tab} onChange={setTab} />
+
+      <RuntimeTracePanel events={events} />
 
       {tab === "preview" && (
         <PlanPreviewPanel
