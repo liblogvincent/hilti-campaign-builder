@@ -45,3 +45,25 @@
 - Snapshot collections now normalize DB snake_case keys (`owner_role`, `rollout_target`, `created_at`) to client-friendly camelCase fields so downstream render logic can consume snapshot rows directly.
 - Added focused mapping validation using fake Supabase chain methods; no live DB is needed for the regression test.
 - Kept `agentThreads: []` per brief/sample behavior.
+
+## Fix 3.2 (2026-07-06)
+
+### Files Changed
+- `server/campaign-runtime.mjs` (`mapContentRequirement` now preserves canonical source and required compliance text)
+- `server/runtime-api.test.mjs` (supabase mapping test asserts canonical `source` and non-empty/expected `compliance`)
+- `.superpowers/sdd/task-3-report.md` (appended this fix report)
+
+### Verification
+- `npm test -- server/runtime-api.test.mjs` → `9 passed`
+- `npm test` → `4 test files, 113 tests passed`
+
+### Commit
+- `153f920`
+
+### Self-Review
+- `mapContentRequirement` now defaults `source` to `"Content Planning matrix"` unless the row already contains that exact canonical source.
+- `compliance` now defaults to Panda parity rules: Claims channel gets `Requires source-backed claim review before H2.`, all others get `Requires brand, tone, and locale fit check before H2.`
+- Regression coverage now explicitly validates source/compliance mapping for Supabase content requirements to prevent UI rendering regressions.
+
+
+

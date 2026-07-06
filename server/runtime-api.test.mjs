@@ -187,6 +187,8 @@ describe("campaign snapshot runtime", () => {
     expect(snapshot.contentRequirements[0]).toMatchObject({
       campaignId: "camp_04",
       assetType: "copy",
+      source: "Content Planning matrix",
+      compliance: "Requires brand, tone, and locale fit check before H2.",
       rolloutTarget: "Contentful",
       ownerRole: "Campaign Owner",
     });

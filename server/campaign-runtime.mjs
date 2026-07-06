@@ -119,6 +119,15 @@ function mapWorkObject(row) {
 }
 
 function mapContentRequirement(row) {
+  const canonicalSource = "Content Planning matrix";
+  const source = row.source === canonicalSource ? row.source : canonicalSource;
+  const rowCompliance = typeof row.compliance === "string" ? row.compliance.trim() : "";
+  const isClaimsChannel = typeof row.channel === "string" && row.channel.toLowerCase() === "claims";
+  const fallbackCompliance =
+    isClaimsChannel
+      ? "Requires source-backed claim review before H2."
+      : "Requires brand, tone, and locale fit check before H2.";
+
   return {
     id: row.id,
     campaignId: row.campaign_id,
@@ -134,8 +143,8 @@ function mapContentRequirement(row) {
     updatedBy: row.updated_by,
     ownerId: row.owner_id,
     updatedAt: row.updated_at,
-    source: "Campaign Runtime",
-    compliance: "",
+    source,
+    compliance: rowCompliance.length > 0 ? rowCompliance : fallbackCompliance,
   };
 }
 
