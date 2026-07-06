@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { callJsonAgent } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
+import { persistAgentTurn } from "./agent-runtime.mjs";
 import { buildFallback, buildIntegrationPackage, buildOrchestratorAnswer } from "./panda-packets.mjs";
+import { createSupabaseServerClient } from "./supabase-client.mjs";
 
 const systemPrompt = `You are Panda, a DeepSeek-backed campaign orchestration agent for Hilti Agentic E2E.
 Return only compact JSON. Ground your output in this product truth:
@@ -56,18 +58,33 @@ export async function handleAgent(req, res) {
 
   const payload = await readJson(req);
   const fallback = buildFallback(payload);
+  const campaignId = resolveCampaignId(payload);
+  const workspace = workspaceForPhase(payload.phase);
+  const supabase = createSupabaseServerClient();
 
+  let result;
   try {
-    const result = await callJsonAgent({
+    result = await callJsonAgent({
       payload,
       systemPrompt,
       fallback,
       normalize: (data, _payload, mode) => normalizeResponse(data, payload, mode),
     });
-    return sendJson(res, 200, result);
   } catch (error) {
-    return sendJson(res, 200, { mode: "fixture", warning: error instanceof Error ? error.message : "Agent call failed", ...fallback });
+    result = { mode: "fixture", warning: error instanceof Error ? error.message : "Agent call failed", ...fallback };
   }
+
+  const persistedResult = await persistTurnIfConfigured({
+    supabase,
+    campaignId,
+    workspace,
+    agentId: "home-orchestrator",
+    userText: resolveAgentInstruction(payload),
+    answerText: responseSummary(result, fallback),
+    result,
+  });
+
+  return sendJson(res, 200, persistedResult);
 }
 
 export async function handleOrchestrator(req, res) {
@@ -78,18 +95,33 @@ export async function handleOrchestrator(req, res) {
   const payload = await readJson(req);
   const agent = getAgentDefinition(payload.agent_scope);
   const fallback = buildOrchestratorAnswer(payload);
+  const campaignId = resolveCampaignId(payload);
+  const workspace = resolveWorkspaceFromScope(payload.agent_scope, payload.current_view);
+  const supabase = createSupabaseServerClient();
 
+  let result;
   try {
-    const result = await callJsonAgent({
+    result = await callJsonAgent({
       payload,
       systemPrompt: agent.systemPrompt,
       fallback,
       normalize: (data, _payload, mode) => normalizeOrchestratorResponse(data, payload, mode),
     });
-    return sendJson(res, 200, result);
   } catch (error) {
-    return sendJson(res, 200, { mode: "fixture", warning: error instanceof Error ? error.message : "Orchestrator call failed", ...fallback });
+    result = { mode: "fixture", warning: error instanceof Error ? error.message : "Orchestrator call failed", ...fallback };
   }
+
+  const persistedResult = await persistTurnIfConfigured({
+    supabase,
+    campaignId,
+    workspace,
+    agentId: agent.id,
+    userText: resolveOrchestratorQuestion(payload),
+    answerText: responseAnswer(result, fallback),
+    result,
+  });
+
+  return sendJson(res, 200, persistedResult);
 }
 
 export async function handleIntegrationStatus(_req, res) {
@@ -278,4 +310,80 @@ function readBody(req) {
     req.on("end", () => resolve(body));
     req.on("error", reject);
   });
+}
+
+async function persistTurnIfConfigured({ supabase, campaignId, workspace, agentId, userText, answerText, result }) {
+  if (!supabase) return result;
+
+  try {
+    await persistAgentTurn({
+      campaignId,
+      workspace,
+      agentId,
+      userText,
+      answerText,
+      modelMode: typeof result.mode === "string" ? result.mode : "unknown",
+      supabase,
+    });
+    return result;
+  } catch (error) {
+    return {
+      ...result,
+      warning: joinWarnings(result.warning, error instanceof Error ? error.message : "Durable runtime persistence failed"),
+    };
+  }
+}
+
+function resolveCampaignId(payload) {
+  return typeof payload.campaign_id === "string" && payload.campaign_id.trim()
+    ? payload.campaign_id.trim()
+    : typeof payload.campaignId === "string" && payload.campaignId.trim()
+    ? payload.campaignId.trim()
+    : "unknown-campaign";
+}
+
+function workspaceForPhase(phase) {
+  if (phase === "planning") return "campaign-planning";
+  if (phase === "content") return "content";
+  if (phase === "rollout") return "rollout";
+  if (phase === "optimize") return "optimize";
+  return "home";
+}
+
+function resolveWorkspaceFromScope(agentScope, currentView) {
+  if (typeof agentScope?.surface === "string" && agentScope.surface.trim()) return agentScope.surface.trim();
+  if (typeof agentScope?.view === "string" && agentScope.view.trim()) return agentScope.view.trim();
+  if (typeof currentView === "string" && currentView.trim()) return currentView.trim();
+  return "home";
+}
+
+function resolveAgentInstruction(payload) {
+  if (typeof payload.instruction === "string" && payload.instruction.trim()) return payload.instruction.trim();
+  if (typeof payload.question === "string" && payload.question.trim()) return payload.question.trim();
+  if (typeof payload.brief === "string" && payload.brief.trim()) return payload.brief.trim();
+  return "Create the next gate-ready artifact packet.";
+}
+
+function resolveOrchestratorQuestion(payload) {
+  if (typeof payload.question === "string" && payload.question.trim()) return payload.question.trim();
+  if (typeof payload.instruction === "string" && payload.instruction.trim()) return payload.instruction.trim();
+  return "What should Panda do next?";
+}
+
+function responseSummary(result, fallback) {
+  if (typeof result.summary === "string" && result.summary.trim()) return result.summary.trim();
+  if (typeof result.answer === "string" && result.answer.trim()) return result.answer.trim();
+  return typeof fallback.summary === "string" ? fallback.summary : "Panda packet is ready.";
+}
+
+function responseAnswer(result, fallback) {
+  if (typeof result.answer === "string" && result.answer.trim()) return result.answer.trim();
+  if (typeof result.summary === "string" && result.summary.trim()) return result.summary.trim();
+  return typeof fallback.answer === "string" ? fallback.answer : "Panda is ready.";
+}
+
+function joinWarnings(existingWarning, nextWarning) {
+  if (!existingWarning) return nextWarning;
+  if (!nextWarning) return existingWarning;
+  return `${existingWarning}\n\n${nextWarning}`;
 }

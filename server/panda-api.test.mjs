@@ -6,7 +6,7 @@ import { getAgentDefinition } from "./agent-registry.mjs";
 import { createAgentMessageEvent, createGateDecisionEvent, createObjectPatchEvent, createRuntimeEvent } from "./runtime-events.mjs";
 import { canUseSupabase, runtimeMode } from "./supabase-client.mjs";
 
-const { generateTextMock, createOpenAiMock } = vi.hoisted(() => ({
+const { generateTextMock, createOpenAiMock, createClientMock } = vi.hoisted(() => ({
   generateTextMock: vi.fn(async () => ({ text: '{"answer":"from-sdk"}' })),
   createOpenAiMock: vi.fn((options) => {
     const provider = vi.fn(() => {
@@ -16,6 +16,7 @@ const { generateTextMock, createOpenAiMock } = vi.hoisted(() => ({
     provider.chat = vi.fn((name) => `mock-chat:${name}`);
     return provider;
   }),
+  createClientMock: vi.fn(),
 }));
 
 vi.mock("ai", () => ({
@@ -24,6 +25,10 @@ vi.mock("ai", () => ({
 
 vi.mock("@ai-sdk/openai", () => ({
   createOpenAI: createOpenAiMock,
+}));
+
+vi.mock("@supabase/supabase-js", () => ({
+  createClient: createClientMock,
 }));
 
 describe("ai transport", () => {
@@ -302,6 +307,227 @@ describe("panda api handlers", () => {
     restoreEnvKey("DEEPSEEK_API_KEY", originalKey);
   });
 
+  it("persists a phase packet turn when Supabase runtime is enabled", async () => {
+    const client = createFakeSupabaseClient({
+      agent_threads: {
+        upsert: [
+          {
+            data: { id: 41, campaign_id: "camp_04", workspace: "campaign-planning", agent_id: "home-orchestrator" },
+            error: null,
+          },
+        ],
+      },
+      agent_messages: {
+        insert: [
+          {
+            data: {
+              id: 100,
+              thread_id: 41,
+              role: "user",
+              text: "Create the next gate-ready artifact packet.",
+              model_mode: "user",
+            },
+            error: null,
+          },
+          {
+            data: {
+              id: 101,
+              thread_id: 41,
+              role: "agent",
+              text: "H1 packet is ready.",
+              model_mode: "fixture",
+            },
+            error: null,
+          },
+        ],
+      },
+      runtime_events: {
+        insert: [{ data: null, error: null }],
+      },
+    });
+    createClientMock.mockReturnValue(client.client);
+
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.PANDA_RUNTIME_MODE = "supabase";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    delete process.env.DEEPSEEK_API_KEY;
+
+    const res = createResponse();
+    await handleAgent(createRequest("POST", { phase: "planning", campaign_id: "camp_04", instruction: "Create the next gate-ready artifact packet." }), res);
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.mode).toBe("fixture");
+    expect(body.summary).toBeTruthy();
+    expect(client.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: "agent_threads",
+          op: "upsert",
+          payload: expect.objectContaining({
+            campaign_id: "camp_04",
+            workspace: "campaign-planning",
+            agent_id: "home-orchestrator",
+          }),
+        }),
+        expect.objectContaining({
+          table: "agent_messages",
+          op: "insert",
+          payload: expect.objectContaining({
+            thread_id: 41,
+            role: "user",
+            text: "Create the next gate-ready artifact packet.",
+            model_mode: "user",
+          }),
+        }),
+        expect.objectContaining({
+          table: "agent_messages",
+          op: "insert",
+          payload: expect.objectContaining({
+            thread_id: 41,
+            role: "agent",
+            text: body.summary,
+            model_mode: "fixture",
+          }),
+        }),
+        expect.objectContaining({
+          table: "runtime_events",
+          op: "insert",
+          payload: expect.objectContaining({
+            campaign_id: "camp_04",
+            workspace: "campaign-planning",
+            type: "agent_message",
+            actor: "home-orchestrator",
+            payload: expect.objectContaining({
+              text: body.summary,
+            }),
+          }),
+        }),
+      ]),
+    );
+
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+  });
+
+  it("persists a scoped orchestrator turn when Supabase runtime is enabled", async () => {
+    const client = createFakeSupabaseClient({
+      agent_threads: {
+        upsert: [
+          {
+            data: { id: 51, campaign_id: "camp_04", workspace: "campaign-planning", agent_id: "campaign-planning-specialist" },
+            error: null,
+          },
+        ],
+      },
+      agent_messages: {
+        insert: [
+          {
+            data: {
+              id: 201,
+              thread_id: 51,
+              role: "user",
+              text: "What is missing before H2?",
+              model_mode: "user",
+            },
+            error: null,
+          },
+          {
+            data: {
+              id: 202,
+              thread_id: 51,
+              role: "agent",
+              text: "H2 is not ready yet.",
+              model_mode: "fixture",
+            },
+            error: null,
+          },
+        ],
+      },
+      runtime_events: {
+        insert: [{ data: null, error: null }],
+      },
+    });
+    createClientMock.mockReturnValue(client.client);
+
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.PANDA_RUNTIME_MODE = "supabase";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    delete process.env.DEEPSEEK_API_KEY;
+
+    const res = createResponse();
+    await handleOrchestrator(
+      createRequest("POST", {
+        campaign_id: "camp_04",
+        question: "What is missing before H2?",
+        agent_scope: { id: "campaign-planning-specialist", view: "campaign-planning" },
+      }),
+      res,
+    );
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.mode).toBe("fixture");
+    expect(body.answer).toBeTruthy();
+    expect(client.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: "agent_threads",
+          op: "upsert",
+          payload: expect.objectContaining({
+            campaign_id: "camp_04",
+            workspace: "campaign-planning",
+            agent_id: "campaign-planning-specialist",
+          }),
+        }),
+        expect.objectContaining({
+          table: "agent_messages",
+          op: "insert",
+          payload: expect.objectContaining({
+            thread_id: 51,
+            role: "user",
+            text: "What is missing before H2?",
+            model_mode: "user",
+          }),
+        }),
+        expect.objectContaining({
+          table: "agent_messages",
+          op: "insert",
+          payload: expect.objectContaining({
+            thread_id: 51,
+            role: "agent",
+            text: body.answer,
+            model_mode: "fixture",
+          }),
+        }),
+        expect.objectContaining({
+          table: "runtime_events",
+          op: "insert",
+          payload: expect.objectContaining({
+            campaign_id: "camp_04",
+            workspace: "campaign-planning",
+            type: "agent_message",
+            actor: "campaign-planning-specialist",
+            payload: expect.objectContaining({
+              text: body.answer,
+            }),
+          }),
+        }),
+      ]),
+    );
+
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+  });
+
   it("builds integration packages from the serverless handler", async () => {
     const res = createResponse();
 
@@ -533,4 +759,98 @@ function restoreEnvKey(name, value) {
   }
 
   process.env[name] = value;
+}
+
+function createFakeSupabaseClient(scripts = {}) {
+  const operations = [];
+  const tables = new Map(Object.entries(scripts));
+
+  const client = {
+    from(table) {
+      return createFakeQueryBuilder({ table, operations, scripts: tables });
+    },
+  };
+
+  return { client, operations };
+}
+
+function createFakeQueryBuilder({ table, operations, scripts }) {
+  const query = {
+    table,
+    op: "select",
+    filters: [],
+    payload: undefined,
+    options: undefined,
+  };
+
+  const builder = {
+    select(columns = "*") {
+      query.columns = columns;
+      return builder;
+    },
+    insert(payload) {
+      query.op = "insert";
+      query.payload = payload;
+      return builder;
+    },
+    upsert(payload, options) {
+      query.op = "upsert";
+      query.payload = payload;
+      query.options = options;
+      return builder;
+    },
+    eq(column, value) {
+      query.filters.push(["eq", column, value]);
+      return builder;
+    },
+    order(column, options) {
+      query.order = [column, options];
+      return builder;
+    },
+    limit(value) {
+      query.limit = value;
+      return builder;
+    },
+    single() {
+      operations.push(snapshotOperation(query));
+      return Promise.resolve(resolveScriptResult({ table, op: query.op, scripts }));
+    },
+    maybeSingle() {
+      operations.push(snapshotOperation(query));
+      return Promise.resolve(resolveScriptResult({ table, op: query.op, scripts }));
+    },
+    then(resolve, reject) {
+      operations.push(snapshotOperation(query));
+      return Promise.resolve(resolveScriptResult({ table, op: query.op, scripts })).then(resolve, reject);
+    },
+  };
+
+  return builder;
+}
+
+function resolveScriptResult({ table, op, scripts }) {
+  const tableScripts = scripts.get(table) || {};
+  const queue = tableScripts[op] || [];
+  const next = queue.length ? queue.shift() : { data: null, error: null };
+  tableScripts[op] = queue;
+  scripts.set(table, tableScripts);
+  return next;
+}
+
+function snapshotOperation(query) {
+  return {
+    table: query.table,
+    op: query.op,
+    filters: query.filters.map((filter) => [...filter]),
+    payload: cloneValue(query.payload),
+    options: cloneValue(query.options),
+    columns: query.columns,
+    order: cloneValue(query.order),
+    limit: query.limit,
+  };
+}
+
+function cloneValue(value) {
+  if (value === undefined) return value;
+  return JSON.parse(JSON.stringify(value));
 }

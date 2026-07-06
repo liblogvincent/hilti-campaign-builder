@@ -477,7 +477,7 @@ describe("runtime action executor", () => {
 });
 
 describe("agent runtime messages", () => {
-  it("keeps specialist history scoped by workspace", () => {
+  it("keeps specialist history scoped by campaign, workspace, and agent", () => {
     const store = {};
     appendAgentMessageToFixture(store, {
       campaignId: "camp_04",
@@ -488,10 +488,17 @@ describe("agent runtime messages", () => {
     });
     appendAgentMessageToFixture(store, {
       campaignId: "camp_04",
-      workspace: "content",
-      agentId: "content-specialist",
+      workspace: "campaign-planning",
+      agentId: "home-orchestrator",
+      role: "agent",
+      text: "same workspace, different agent",
+    });
+    appendAgentMessageToFixture(store, {
+      campaignId: "camp_05",
+      workspace: "campaign-planning",
+      agentId: "campaign-planning-specialist",
       role: "user",
-      text: "revise copy",
+      text: "new brief",
     });
 
     expect(
@@ -501,16 +508,36 @@ describe("agent runtime messages", () => {
         agentId: "campaign-planning-specialist",
       }).map((m) => m.text),
     ).toEqual(["update markets"]);
+
+    expect(
+      loadAgentHistoryFromFixture(store, {
+        campaignId: "camp_04",
+        workspace: "campaign-planning",
+        agentId: "home-orchestrator",
+      }).map((m) => m.text),
+    ).toEqual(["same workspace, different agent"]);
+
+    expect(
+      loadAgentHistoryFromFixture(store, {
+        campaignId: "camp_05",
+        workspace: "campaign-planning",
+        agentId: "campaign-planning-specialist",
+      }).map((m) => m.text),
+    ).toEqual(["new brief"]);
   });
 
   it("creates an isolated thread per campaign, workspace, and agent in Supabase mode", async () => {
     const client = createFakeSupabaseClient({
       agent_threads: {
+        upsert: [
+          {
+            data: { id: 41, campaign_id: "camp_04", workspace: "campaign-planning", agent_id: "campaign-planning-specialist" },
+            error: null,
+          },
+        ],
         select: [
-          { data: null, error: null },
           { data: { id: 41, campaign_id: "camp_04", workspace: "campaign-planning", agent_id: "campaign-planning-specialist" }, error: null },
         ],
-        insert: [{ data: { id: 41 }, error: null }],
       },
       agent_messages: {
         insert: [
@@ -568,16 +595,7 @@ describe("agent runtime messages", () => {
       expect.arrayContaining([
         expect.objectContaining({
           table: "agent_threads",
-          op: "select",
-          filters: [
-            ["eq", "campaign_id", "camp_04"],
-            ["eq", "workspace", "campaign-planning"],
-            ["eq", "agent_id", "campaign-planning-specialist"],
-          ],
-        }),
-        expect.objectContaining({
-          table: "agent_threads",
-          op: "insert",
+          op: "upsert",
           payload: expect.objectContaining({
             campaign_id: "camp_04",
             workspace: "campaign-planning",
@@ -585,6 +603,18 @@ describe("agent runtime messages", () => {
             visible_to_workspace: true,
             owner_id: null,
           }),
+          options: expect.objectContaining({
+            onConflict: "campaign_id,workspace,agent_id",
+          }),
+        }),
+        expect.objectContaining({
+          table: "agent_threads",
+          op: "select",
+          filters: [
+            ["eq", "campaign_id", "camp_04"],
+            ["eq", "workspace", "campaign-planning"],
+            ["eq", "agent_id", "campaign-planning-specialist"],
+          ],
         }),
         expect.objectContaining({
           table: "agent_messages",
