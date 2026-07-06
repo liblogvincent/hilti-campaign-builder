@@ -9,8 +9,11 @@ import { canUseSupabase, runtimeMode } from "./supabase-client.mjs";
 const { generateTextMock, createOpenAiMock } = vi.hoisted(() => ({
   generateTextMock: vi.fn(async () => ({ text: '{"answer":"from-sdk"}' })),
   createOpenAiMock: vi.fn((options) => {
-    const provider = (name) => `mock:${name}`;
+    const provider = vi.fn(() => {
+      throw new Error("provider callable surface should not be used");
+    });
     provider.options = options;
+    provider.chat = vi.fn((name) => `mock-chat:${name}`);
     return provider;
   }),
 }));
@@ -101,8 +104,11 @@ describe("ai transport", () => {
       apiKey: "sk-test",
       baseURL: "https://api.deepseek.com/v1",
     });
+    const provider = createOpenAiMock.mock.results[0].value;
+    expect(provider).not.toHaveBeenCalled();
+    expect(provider.chat).toHaveBeenCalledWith("deepseek-chat");
     expect(generateTextMock).toHaveBeenCalledWith(expect.objectContaining({
-      model: "mock:deepseek-chat",
+      model: "mock-chat:deepseek-chat",
       system: "Test prompt",
       prompt: JSON.stringify({ phase: "planning" }),
       temperature: 0.2,

@@ -66,7 +66,7 @@ async function callVercelAiSdk({ config, payload, systemPrompt }) {
       baseURL: `${config.baseUrl.replace(/\/$/, "")}/v1`,
     });
     const result = await generateText({
-      model: deepseek(config.model),
+      model: deepseek.chat(config.model),
       system: systemPrompt,
       prompt: JSON.stringify(payload),
       temperature: 0.2,
