@@ -73,3 +73,20 @@ For Anthropic-compatible gateways, use:
 DEEPSEEK_BASE_URL=https://api.deepseek.com/anthropic
 DEEPSEEK_API_STYLE=anthropic
 ```
+
+## Durable Runtime
+
+Set `PANDA_RUNTIME_MODE=supabase` to use Supabase/Postgres as the source of truth.
+
+Required server-side variables:
+
+```powershell
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+PANDA_AI_TRANSPORT=vercel-ai
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+```
+
+Keep `PANDA_RUNTIME_MODE=local` for offline demo mode.
