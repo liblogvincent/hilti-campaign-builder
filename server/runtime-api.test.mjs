@@ -235,4 +235,340 @@ describe("runtime action executor", () => {
     expect(result.revisions).toHaveLength(1);
     expect(result.events[0].type).toBe("object_patch");
   });
+
+  it("updates a planning object status in fixture mode and records a revision", async () => {
+    const run = createDefaultRun();
+    const plan = campaignPlanForRun(run);
+    const snapshot = createCampaignSnapshotFromFixture({
+      run,
+      plan,
+      planningObjects: campaignPlanningObjectsFromPlan(plan),
+      contentRequirements: contentRequirementsFromPlan(plan),
+    });
+
+    const result = await executeRuntimeAction({
+      action: {
+        action: "update_planning_object",
+        targetId: "campaign-objective",
+        status: "revision-requested",
+        note: "Tighten the objective before H1.",
+        payload: { copy: "Reworked campaign objective copy." },
+      },
+      campaignId: run.campaignId,
+      workspace: "campaign-planning",
+      actor: "campaign-planning-specialist",
+      fixtureSnapshot: snapshot,
+    });
+
+    expect(result.snapshot.workObjects.find((item) => item.id === "campaign-objective")).toMatchObject({
+      status: "revision-requested",
+      copy: "Reworked campaign objective copy.",
+    });
+    expect(result.revisions).toHaveLength(1);
+    expect(result.events[0].payload.objectId).toBe("campaign-objective");
+  });
+
+  it("replaces content requirements in fixture mode and records the new list", async () => {
+    const run = createDefaultRun();
+    const plan = campaignPlanForRun(run);
+    const snapshot = createCampaignSnapshotFromFixture({
+      run,
+      plan,
+      planningObjects: campaignPlanningObjectsFromPlan(plan),
+      contentRequirements: contentRequirementsFromPlan(plan),
+    });
+
+    const replacement = [
+      {
+        id: "content-requirement-a",
+        channel: "Email",
+        assetType: "copy",
+        title: "New master email",
+        locale: "de-DE",
+        ownerRole: "Content / Creative",
+        rolloutTarget: "SFMC",
+        status: "approved",
+        evidence: ["Updated matrix"],
+      },
+    ];
+
+    const result = await executeRuntimeAction({
+      action: {
+        action: "update_content_requirements",
+        note: "Replace the matrix with the trimmed H2 scope.",
+        payload: { requirements: replacement },
+      },
+      campaignId: run.campaignId,
+      workspace: "content-planning",
+      actor: "content-planning-specialist",
+      fixtureSnapshot: snapshot,
+    });
+
+    expect(result.snapshot.contentRequirements).toHaveLength(1);
+    expect(result.snapshot.contentRequirements[0]).toMatchObject({
+      id: "content-requirement-a",
+      title: "New master email",
+      status: "approved",
+    });
+    expect(result.revisions).toHaveLength(1);
+    expect(result.events[0].payload.objectId).toBe("content-requirements");
+  });
+
+  it("deletes omitted content requirement rows before upserting a replacement set in Supabase mode", async () => {
+    const run = createDefaultRun();
+    const client = createFakeSupabaseClient({
+      content_requirements: {
+        select: [{ data: [{ id: "cr-1", campaign_id: run.campaignId }, { id: "cr-2", campaign_id: run.campaignId }], error: null }],
+        delete: [{ data: null, error: null }],
+        upsert: [{ data: null, error: null }],
+        object_revisions: [{ data: null, error: null }],
+        runtime_events: [{ data: null, error: null }],
+      },
+    });
+
+    const replacement = [
+      {
+        id: "cr-1",
+        channel: "Email",
+        assetType: "copy",
+        title: "Email master",
+        locale: "de-DE",
+        ownerRole: "Content / Creative",
+        rolloutTarget: "SFMC",
+        status: "approved",
+        evidence: ["Replacement"],
+      },
+    ];
+
+    const result = await executeRuntimeAction({
+      action: {
+        action: "update_content_requirements",
+        note: "Trim the replacement matrix.",
+        payload: { requirements: replacement },
+      },
+      campaignId: run.campaignId,
+      workspace: "content-planning",
+      actor: "content-planning-specialist",
+      supabase: client.client,
+    });
+
+    expect(result.events).toHaveLength(1);
+    expect(client.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: "content_requirements",
+          op: "delete",
+          filters: [
+            ["eq", "campaign_id", run.campaignId],
+            ["in", "id", ["cr-2"]],
+          ],
+        }),
+        expect.objectContaining({
+          table: "content_requirements",
+          op: "upsert",
+          payload: expect.arrayContaining([expect.objectContaining({ id: "cr-1", status: "approved" })]),
+        }),
+      ]),
+    );
+  });
+
+  it("deletes all content requirement rows when the replacement list is empty", async () => {
+    const run = createDefaultRun();
+    const client = createFakeSupabaseClient({
+      content_requirements: {
+        select: [{ data: [{ id: "cr-1", campaign_id: run.campaignId }], error: null }],
+        delete: [{ data: null, error: null }],
+        upsert: [{ data: null, error: null }],
+        object_revisions: [{ data: null, error: null }],
+        runtime_events: [{ data: null, error: null }],
+      },
+    });
+
+    await executeRuntimeAction({
+      action: {
+        action: "update_content_requirements",
+        note: "Clear the matrix.",
+        payload: { requirements: [] },
+      },
+      campaignId: run.campaignId,
+      workspace: "content-planning",
+      actor: "content-planning-specialist",
+      supabase: client.client,
+    });
+
+    expect(client.operations.some((entry) => entry.table === "content_requirements" && entry.op === "delete")).toBe(true);
+    expect(client.operations.find((entry) => entry.table === "content_requirements" && entry.op === "delete").filters).toEqual([
+      ["eq", "campaign_id", run.campaignId],
+    ]);
+  });
+
+  it("persists top-level status on a single content requirement update in Supabase mode", async () => {
+    const run = createDefaultRun();
+    const client = createFakeSupabaseClient({
+      content_requirements: {
+        select: [{ data: { id: "cr-1", campaign_id: run.campaignId, status: "draft", title: "Old title" }, error: null }],
+        update: [{ data: null, error: null }],
+        object_revisions: [{ data: null, error: null }],
+        runtime_events: [{ data: null, error: null }],
+      },
+    });
+
+    await executeRuntimeAction({
+      action: {
+        action: "update_content_requirements",
+        targetId: "cr-1",
+        status: "approved",
+        note: "Approve the requirement.",
+        payload: { title: "New title" },
+      },
+      campaignId: run.campaignId,
+      workspace: "content-planning",
+      actor: "content-planning-specialist",
+      supabase: client.client,
+    });
+
+    const updateOperation = client.operations.find((entry) => entry.table === "content_requirements" && entry.op === "update");
+    expect(updateOperation.payload).toMatchObject({
+      title: "New title",
+      status: "approved",
+    });
+    const revisionOperation = client.operations.find((entry) => entry.table === "object_revisions" && entry.op === "insert");
+    expect(revisionOperation.payload.after_data.status).toBe("approved");
+  });
+
+  it("rejects when persistence writes fail in Supabase mode", async () => {
+    const run = createDefaultRun();
+    const client = createFakeSupabaseClient({
+      work_objects: {
+        select: [{ data: { id: "campaign-objective", campaign_id: run.campaignId, status: "draft", title: "Objective" }, error: null }],
+        update: [{ data: null, error: null }],
+      },
+      object_revisions: {
+        insert: [{ data: null, error: new Error("revision write failed") }],
+      },
+      runtime_events: {
+        insert: [{ data: null, error: null }],
+      },
+    });
+
+    await expect(
+      executeRuntimeAction({
+        action: {
+          action: "update_planning_object",
+          targetId: "campaign-objective",
+          status: "approved",
+          note: "Approve the objective.",
+          payload: { copy: "Final copy." },
+        },
+        campaignId: run.campaignId,
+        workspace: "campaign-planning",
+        actor: "campaign-planning-specialist",
+        supabase: client.client,
+      }),
+    ).rejects.toThrow("revision write failed");
+  });
 });
+
+function createFakeSupabaseClient(scripts = {}) {
+  const operations = [];
+  const tables = new Map(Object.entries(scripts));
+
+  const client = {
+    from(table) {
+      return createFakeQueryBuilder({ table, operations, scripts: tables });
+    },
+  };
+
+  return { client, operations };
+}
+
+function createFakeQueryBuilder({ table, operations, scripts }) {
+  const query = {
+    table,
+    op: "select",
+    filters: [],
+    payload: undefined,
+    options: undefined,
+  };
+
+  const builder = {
+    select(columns = "*") {
+      query.op = "select";
+      query.columns = columns;
+      return builder;
+    },
+    insert(payload) {
+      query.op = "insert";
+      query.payload = payload;
+      return builder;
+    },
+    update(payload) {
+      query.op = "update";
+      query.payload = payload;
+      return builder;
+    },
+    delete() {
+      query.op = "delete";
+      return builder;
+    },
+    upsert(payload, options) {
+      query.op = "upsert";
+      query.payload = payload;
+      query.options = options;
+      return builder;
+    },
+    eq(column, value) {
+      query.filters.push(["eq", column, value]);
+      return builder;
+    },
+    in(column, values) {
+      query.filters.push(["in", column, values]);
+      return builder;
+    },
+    order(column, options) {
+      query.order = [column, options];
+      return builder;
+    },
+    limit(value) {
+      query.limit = value;
+      return builder;
+    },
+    single() {
+      operations.push(snapshotOperation(query));
+      return Promise.resolve(resolveScriptResult({ table, op: "select", scripts }));
+    },
+    then(resolve, reject) {
+      operations.push(snapshotOperation(query));
+      return Promise.resolve(resolveScriptResult({ table, op: query.op, scripts })).then(resolve, reject);
+    },
+  };
+
+  return builder;
+}
+
+function resolveScriptResult({ table, op, scripts }) {
+  const tableScripts = scripts.get(table) || {};
+  const queue = tableScripts[op] || [];
+  const next = queue.length ? queue.shift() : { data: null, error: null };
+  tableScripts[op] = queue;
+  scripts.set(table, tableScripts);
+  return next;
+}
+
+function snapshotOperation(query) {
+  return {
+    table: query.table,
+    op: query.op,
+    filters: query.filters.map((filter) => [...filter]),
+    payload: cloneValue(query.payload),
+    options: cloneValue(query.options),
+    columns: query.columns,
+    order: cloneValue(query.order),
+    limit: query.limit,
+  };
+}
+
+function cloneValue(value) {
+  if (value === undefined) return value;
+  return JSON.parse(JSON.stringify(value));
+}

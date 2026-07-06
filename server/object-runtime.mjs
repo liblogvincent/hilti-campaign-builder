@@ -12,6 +12,7 @@ export async function executeRuntimeAction({ action, campaignId, workspace, acto
     ...action,
     note: typeof action.note === "string" ? action.note : "",
     targetId: typeof action.targetId === "string" ? action.targetId.trim() : undefined,
+    status: typeof action.status === "string" ? action.status.trim() : undefined,
     payload: isPlainObject(action.payload) ? action.payload : {},
   };
 
@@ -298,8 +299,24 @@ async function executeSupabaseAction({ action, campaignId, workspace, actor, sup
       if (currentError) throw currentError;
 
       const nextRows = action.payload.requirements.map((item) => toContentRequirementRow(item, campaignId, actor));
-      const { error: upsertError } = await supabase.from("content_requirements").upsert(nextRows, { onConflict: "campaign_id,id" });
-      if (upsertError) throw upsertError;
+      const currentIds = Array.isArray(currentRows) ? currentRows.map((row) => row?.id).filter(stringValue) : [];
+      const incomingIds = new Set(nextRows.map((row) => row.id));
+      const idsToDelete = currentIds.filter((id) => !incomingIds.has(id));
+
+      if (nextRows.length === 0) {
+        let deleteQuery = supabase.from("content_requirements").delete().eq("campaign_id", campaignId);
+        const { error: deleteError } = await deleteQuery;
+        if (deleteError) throw deleteError;
+      } else if (idsToDelete.length > 0) {
+        let deleteQuery = supabase.from("content_requirements").delete().eq("campaign_id", campaignId).in("id", idsToDelete);
+        const { error: deleteError } = await deleteQuery;
+        if (deleteError) throw deleteError;
+      }
+
+      if (nextRows.length > 0) {
+        const { error: upsertError } = await supabase.from("content_requirements").upsert(nextRows, { onConflict: "campaign_id,id" });
+        if (upsertError) throw upsertError;
+      }
 
       const event = createObjectPatchEvent({
         campaignId,
@@ -335,7 +352,7 @@ async function executeSupabaseAction({ action, campaignId, workspace, actor, sup
       .single();
     if (currentError) throw currentError;
 
-    const next = patchContentRequirementRow(current, action.payload, actor);
+    const next = patchContentRequirementRow(current, action.payload, action, actor);
     const { error: updateError } = await supabase
       .from("content_requirements")
       .update({
@@ -393,6 +410,9 @@ async function persistRevisionAndEvent({ supabase, campaignId, objectId, objectT
     createdAt: event.timestamp,
   });
 
+  // Without a database RPC/transaction helper, these writes remain sequential.
+  // Errors are intentionally surfaced immediately so callers can detect partial
+  // persistence and we can swap this helper for a future atomic RPC later.
   const { error: revisionError } = await supabase.from("object_revisions").insert({
     campaign_id: revision.campaignId,
     object_id: revision.objectId,
@@ -502,7 +522,7 @@ function patchPlanningObjectRow(current, payload, action, actor) {
   };
 }
 
-function patchContentRequirementRow(current, payload, actor) {
+function patchContentRequirementRow(current, payload, action, actor) {
   const now = new Date().toISOString();
   return {
     ...current,
@@ -513,7 +533,7 @@ function patchContentRequirementRow(current, payload, actor) {
     ...(stringValue(payload.ownerRole) ? { owner_role: payload.ownerRole } : {}),
     ...(stringValue(payload.owner) ? { owner_role: payload.owner } : {}),
     ...(stringValue(payload.source) ? { source: payload.source } : {}),
-    ...(actionStatus(payload) ? { status: actionStatus(payload) } : {}),
+    ...(action.status ? { status: assertRuntimeStatus(action.status) } : {}),
     ...(stringValue(payload.rolloutTarget) ? { rollout_target: payload.rolloutTarget } : stringValue(payload.rollout_target) ? { rollout_target: payload.rollout_target } : {}),
     ...(arrayValue(payload.evidence, payload.evidence) ? { evidence: payload.evidence } : {}),
     updated_by: actor,
