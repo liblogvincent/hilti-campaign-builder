@@ -1,5 +1,5 @@
-import { assertAgentAction, assertRuntimeStatus } from "./runtime-schema.mjs";
-import { createObjectPatchEvent, createObjectRevisionRecord } from "./runtime-events.mjs";
+import { assertAgentAction, assertGate, assertRuntimeStatus } from "./runtime-schema.mjs";
+import { createGateDecisionEvent, createObjectPatchEvent, createObjectRevisionRecord } from "./runtime-events.mjs";
 
 export async function executeRuntimeAction({ action, campaignId, workspace, actor, supabase, fixtureSnapshot }) {
   if (!action || typeof action !== "object") {
@@ -13,6 +13,9 @@ export async function executeRuntimeAction({ action, campaignId, workspace, acto
     note: typeof action.note === "string" ? action.note : "",
     targetId: typeof action.targetId === "string" ? action.targetId.trim() : undefined,
     status: typeof action.status === "string" ? action.status.trim() : undefined,
+    gateId: typeof action.gateId === "string" ? action.gateId.trim() : undefined,
+    decision: typeof action.decision === "string" ? action.decision.trim() : undefined,
+    reviewer: typeof action.reviewer === "string" ? action.reviewer.trim() : undefined,
     payload: isPlainObject(action.payload) ? action.payload : {},
   };
 
@@ -186,6 +189,44 @@ function executeFixtureAction({ action, campaignId, workspace, actor, snapshot }
     };
   }
 
+  if (action.action === "create_gate_decision") {
+    const details = normalizeGateDecisionAction(action, actor);
+    const gateDecision = {
+      gateId: details.gateId,
+      decision: details.frontendDecision,
+      reviewer: details.reviewer,
+      comment: details.comment,
+      artifactsReviewed: details.artifactsReviewed,
+      timestamp: details.timestamp,
+    };
+    const event = createGateDecisionEvent({
+      campaignId,
+      gateId: details.gateId,
+      decision: details.runtimeDecision,
+      reviewer: details.reviewer,
+      comment: details.comment,
+    });
+    const nextSnapshot = {
+      ...snapshot,
+      campaign:
+        details.runtimeDecision === "approved" && snapshot.campaign
+          ? {
+              ...snapshot.campaign,
+              phase: nextRuntimePhaseState(snapshot.campaign.phase).phase,
+              activeGate: nextRuntimePhaseState(snapshot.campaign.phase).activeGate,
+            }
+          : snapshot.campaign,
+      gateDecisions: mergeGateDecisions(snapshot.gateDecisions, gateDecision),
+      events: [...snapshot.events, event],
+    };
+
+    return {
+      snapshot: nextSnapshot,
+      revisions: [],
+      events: [event],
+    };
+  }
+
   return { snapshot, revisions: [], events: [] };
 }
 
@@ -200,12 +241,20 @@ async function executeSupabaseAction({ action, campaignId, workspace, actor, sup
     if (planError) throw planError;
 
     const current = currentPlans?.[0];
-    if (!current) throw new Error(`Campaign plan not found for campaign ${campaignId}`);
+    const currentOrSeed =
+      current ??
+      (await createInitialCampaignPlanRow({
+        supabase,
+        campaignId,
+        actor,
+        payload: action.payload,
+      }));
 
-    const after = patchCampaignPlanRow(current, action.payload, actor);
+    const isSeedInsert = !current;
+    const after = patchCampaignPlanRow(currentOrSeed, action.payload, actor);
     const next = {
       ...after,
-      version: Number(current.version || 1) + 1,
+      version: isSeedInsert ? 1 : Number(currentOrSeed.version || 1) + 1,
       updated_by: actor,
       updated_at: new Date().toISOString(),
     };
@@ -229,7 +278,7 @@ async function executeSupabaseAction({ action, campaignId, workspace, actor, sup
       objectId: "campaign-plan",
       objectType: "campaign_plan",
       action,
-      before: current,
+      before: current ?? {},
       after: next,
       actor,
       event,
@@ -394,6 +443,50 @@ async function executeSupabaseAction({ action, campaignId, workspace, actor, sup
     return { snapshot: undefined, revisions: [], events: [event] };
   }
 
+  if (action.action === "create_gate_decision") {
+    const details = normalizeGateDecisionAction(action, actor);
+    const { data: campaign, error: campaignError } = await supabase
+      .from("campaigns")
+      .select("*")
+      .eq("id", campaignId)
+      .single();
+    if (campaignError) throw campaignError;
+
+    const { error: decisionError } = await supabase.from("gate_decisions").insert({
+      campaign_id: campaignId,
+      gate: details.gateId,
+      decision: details.runtimeDecision,
+      reviewer: details.reviewer,
+      owner_id: null,
+      comment: details.comment,
+      created_at: details.timestamp,
+    });
+    if (decisionError) throw decisionError;
+
+    if (details.runtimeDecision === "approved") {
+      const nextPhase = nextRuntimePhaseState(campaign.phase);
+      const { error: updateError } = await supabase
+        .from("campaigns")
+        .update({
+          phase: nextPhase.phase,
+          active_gate: nextPhase.activeGate,
+          updated_at: details.timestamp,
+        })
+        .eq("id", campaignId);
+      if (updateError) throw updateError;
+    }
+
+    const event = createGateDecisionEvent({
+      campaignId,
+      gateId: details.gateId,
+      decision: details.runtimeDecision,
+      reviewer: details.reviewer,
+      comment: details.comment,
+    });
+    await persistRuntimeEventOnly({ supabase, event });
+    return { snapshot: undefined, revisions: [], events: [event] };
+  }
+
   throw new Error(`Unsupported Supabase action: ${action.action}`);
 }
 
@@ -437,6 +530,19 @@ async function persistRevisionAndEvent({ supabase, campaignId, objectId, objectT
     created_at: event.timestamp,
   });
   if (eventError) throw eventError;
+}
+
+async function persistRuntimeEventOnly({ supabase, event }) {
+  const { error } = await supabase.from("runtime_events").insert({
+    id: event.id,
+    campaign_id: event.campaignId,
+    workspace: event.workspace,
+    type: event.type,
+    actor: event.actor,
+    payload: event.payload,
+    created_at: event.timestamp,
+  });
+  if (error) throw error;
 }
 
 function patchCampaignPlan(before, payload) {
@@ -503,6 +609,16 @@ function patchCampaignPlanRow(current, payload, actor) {
     updated_by: actor,
     updated_at: now,
   };
+}
+
+function mergeGateDecisions(currentDecisions, decision) {
+  const existing = Array.isArray(currentDecisions) ? currentDecisions : [];
+  return [
+    ...existing.filter(
+      (item) => !(item?.gateId === decision.gateId && item?.decision === decision.decision),
+    ),
+    decision,
+  ];
 }
 
 function patchPlanningObjectRow(current, payload, action, actor) {
@@ -587,6 +703,89 @@ function actionStatus(payload) {
   if (!isPlainObject(payload)) return undefined;
   if (!stringValue(payload.status)) return undefined;
   return assertRuntimeStatus(payload.status);
+}
+
+async function createInitialCampaignPlanRow({ supabase, campaignId, actor, payload }) {
+  const { data: campaign, error } = await supabase
+    .from("campaigns")
+    .select("*")
+    .eq("id", campaignId)
+    .single();
+  if (error) throw error;
+
+  return {
+    campaign_id: campaignId,
+    version: 1,
+    name: stringValue(payload.name) || campaign?.name || campaignId,
+    hero_product:
+      stringValue(payload.heroProduct) ||
+      stringValue(payload.hero_product) ||
+      campaign?.name ||
+      campaignId,
+    markets: arrayValue(payload.markets, []) ?? [],
+    locales: arrayValue(payload.locales, []) ?? [],
+    audience: arrayValue(payload.audience, []) ?? [],
+    budget: typeof payload.budget === "string" ? payload.budget : "",
+    timeline: typeof payload.timeline === "string" ? payload.timeline : "",
+    channels: arrayValue(payload.channels, []) ?? [],
+    kpis: arrayValue(payload.kpis, []) ?? [],
+    assumptions: arrayValue(payload.assumptions, []) ?? [],
+    updated_by: actor,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function normalizeGateDecisionAction(action, actor) {
+  const payload = isPlainObject(action.payload) ? action.payload : {};
+  const gateId = assertGate(
+    stringValue(action.gateId) ||
+      stringValue(payload.gateId) ||
+      stringValue(payload.gate_id) ||
+      "H1",
+  );
+  const runtimeDecision = normalizeRuntimeGateDecision(
+    stringValue(action.decision) || stringValue(payload.decision) || "revision-requested",
+  );
+  const frontendDecision = runtimeDecision === "revision-requested" ? "revision_requested" : runtimeDecision;
+  const reviewer =
+    stringValue(action.reviewer) ||
+    stringValue(payload.reviewer) ||
+    stringValue(actor) ||
+    "Campaign Owner";
+  const comment =
+    stringValue(payload.comment) ||
+    stringValue(action.note) ||
+    (runtimeDecision === "approved"
+      ? "Approved in Panda prototype."
+      : "Revision requested from Panda before approval.");
+  const artifactsReviewed = Array.isArray(payload.artifactsReviewed)
+    ? payload.artifactsReviewed.filter((item) => typeof item === "string" && item.trim())
+    : Array.isArray(payload.artifacts_reviewed)
+    ? payload.artifacts_reviewed.filter((item) => typeof item === "string" && item.trim())
+    : [];
+
+  return {
+    gateId,
+    runtimeDecision,
+    frontendDecision,
+    reviewer,
+    comment,
+    artifactsReviewed,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function normalizeRuntimeGateDecision(value) {
+  if (value === "approved" || value === "blocked") return value;
+  if (value === "revision_requested" || value === "revision-requested") return "revision-requested";
+  throw new Error(`Invalid gate decision: ${value}`);
+}
+
+function nextRuntimePhaseState(phase) {
+  if (phase === "planning") return { phase: "content", activeGate: "H2" };
+  if (phase === "content") return { phase: "rollout", activeGate: "H3" };
+  if (phase === "rollout") return { phase: "optimize", activeGate: "H4" };
+  return { phase: "optimize", activeGate: "H4" };
 }
 
 function stringValue(value) {

@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import { handleAgent, handleHealth, handleIntegrationPackage, handleOrchestrator, normalizeOrchestratorResponse } from "./panda-api.mjs";
+import { handleAgent, handleGateDecision, handleHealth, handleIntegrationPackage, handleOrchestrator, normalizeOrchestratorResponse } from "./panda-api.mjs";
 import * as aiTransport from "./ai-transport.mjs";
 import { callJsonAgent, resolveProviderConfig, parseJsonObject } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
@@ -445,6 +445,146 @@ describe("panda api handlers", () => {
         },
       }),
     ]);
+
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+  });
+
+  it("persists a human gate decision through the durable runtime handler", async () => {
+    const client = createFakeSupabaseClient({
+      campaigns: {
+        select: [
+          {
+            data: {
+              id: "camp_04",
+              name: "Fixture Campaign",
+              brief: "Plan a campaign",
+              phase: "content",
+              active_gate: "H2",
+              owner_role: "Campaign Owner",
+              updated_at: "2026-07-06T00:00:00.000Z",
+            },
+            error: null,
+          },
+          {
+            data: {
+              id: "camp_04",
+              name: "Fixture Campaign",
+              brief: "Plan a campaign",
+              phase: "rollout",
+              active_gate: "H3",
+              owner_role: "Campaign Owner",
+              updated_at: "2026-07-06T00:00:05.000Z",
+            },
+            error: null,
+          },
+        ],
+        update: [{ data: null, error: null }],
+      },
+      campaign_plans: {
+        select: [{ data: [], error: null }],
+      },
+      work_objects: {
+        select: [{ data: [], error: null }],
+      },
+      content_requirements: {
+        select: [{ data: [], error: null }],
+      },
+      gate_decisions: {
+        insert: [{ data: null, error: null }],
+        select: [
+          {
+            data: [
+              {
+                id: 91,
+                campaign_id: "camp_04",
+                gate: "H2",
+                decision: "approved",
+                reviewer: "Vincent",
+                comment: "Ready for rollout.",
+                created_at: "2026-07-06T00:00:05.000Z",
+              },
+            ],
+            error: null,
+          },
+        ],
+      },
+      runtime_events: {
+        insert: [{ data: null, error: null }],
+        select: [
+          {
+            data: [
+              {
+                id: "gate_decision_01",
+                campaign_id: "camp_04",
+                workspace: "gates",
+                type: "gate_decision",
+                actor: "Vincent",
+                payload: { gateId: "H2", decision: "approved", comment: "Ready for rollout." },
+                created_at: "2026-07-06T00:00:05.000Z",
+              },
+            ],
+            error: null,
+          },
+        ],
+      },
+    });
+    createClientMock.mockReset();
+    createClientMock.mockReturnValue(client.client);
+
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.PANDA_RUNTIME_MODE = "supabase";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+
+    const res = createResponse();
+    await handleGateDecision(
+      createRequest("POST", {
+        campaign_id: "camp_04",
+        gate_id: "H2",
+        decision: "approved",
+        reviewer: "Vincent",
+        comment: "Ready for rollout.",
+        artifacts_reviewed: ["artifact-1"],
+      }),
+      res,
+    );
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.persisted).toBe(true);
+    expect(body.snapshot.campaign.phase).toBe("rollout");
+    expect(body.snapshot.gateDecisions[0]).toMatchObject({
+      gateId: "H2",
+      decision: "approved",
+      reviewer: "Vincent",
+    });
+    expect(client.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: "gate_decisions",
+          op: "insert",
+          payload: expect.objectContaining({
+            campaign_id: "camp_04",
+            gate: "H2",
+            decision: "approved",
+            reviewer: "Vincent",
+            comment: "Ready for rollout.",
+          }),
+        }),
+        expect.objectContaining({
+          table: "campaigns",
+          op: "update",
+          payload: expect.objectContaining({
+            phase: "rollout",
+            active_gate: "H3",
+          }),
+        }),
+      ]),
+    );
 
     restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
     restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
@@ -1397,8 +1537,21 @@ function createFakeQueryBuilder({ table, operations, scripts }) {
       query.options = options;
       return builder;
     },
+    update(payload) {
+      query.op = "update";
+      query.payload = payload;
+      return builder;
+    },
+    delete() {
+      query.op = "delete";
+      return builder;
+    },
     eq(column, value) {
       query.filters.push(["eq", column, value]);
+      return builder;
+    },
+    in(column, values) {
+      query.filters.push(["in", column, values]);
       return builder;
     },
     order(column, options) {

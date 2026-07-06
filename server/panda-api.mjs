@@ -41,6 +41,7 @@ export async function handlePandaApiRequest(req, res) {
   const pathname = getPathname(req);
   if (pathname === "/api/health") return handleHealth(req, res);
   if (pathname === "/api/agent") return handleAgent(req, res);
+  if (pathname === "/api/gate-decision") return handleGateDecision(req, res);
   if (pathname === "/api/orchestrator") return handleOrchestrator(req, res);
   if (pathname === "/api/integrations/status") return handleIntegrationStatus(req, res);
   if (pathname === "/api/integrations/package") return handleIntegrationPackage(req, res);
@@ -138,6 +139,64 @@ export async function handleOrchestrator(req, res) {
   result = updateExecution.result;
 
   return sendJson(res, 200, result);
+}
+
+export async function handleGateDecision(req, res) {
+  setCors(res);
+  if (req.method === "OPTIONS") return sendJson(res, 204, null);
+  if (req.method !== "POST") return sendJson(res, 405, { error: "Method not allowed" });
+
+  const payload = await readJson(req);
+  const mode = runtimeMode();
+  const campaignId = resolveCampaignId(payload);
+  if (mode !== "supabase") {
+    return sendJson(res, 200, { mode: "local", persisted: false });
+  }
+
+  const supabase = createSupabaseServerClient();
+  if (!supabase) {
+    return sendJson(res, 200, { mode: "local", persisted: false });
+  }
+
+  const gatePayload = normalizeGateDecisionPayload(payload);
+
+  try {
+    const execution = await executeRuntimeAction({
+      action: {
+        action: "create_gate_decision",
+        note: gatePayload.comment,
+        payload: gatePayload,
+      },
+      campaignId,
+      workspace: "gates",
+      actor: gatePayload.reviewer,
+      supabase,
+    });
+
+    try {
+      const snapshot = await loadCampaignSnapshot({ campaignId, supabase, fixture: null });
+      return sendJson(res, 200, {
+        mode: "supabase",
+        persisted: true,
+        events: execution.events,
+        snapshot,
+      });
+    } catch (error) {
+      return sendJson(res, 200, {
+        mode: "supabase",
+        persisted: true,
+        events: execution.events,
+        warning: `Durable runtime gate decision committed, but snapshot refresh failed: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      });
+    }
+  } catch (error) {
+    return sendJson(res, 503, {
+      error: "Durable runtime gate persistence failed",
+      details: error instanceof Error ? error.message : "Durable runtime gate persistence failed",
+    });
+  }
 }
 
 export async function handleIntegrationStatus(_req, res) {
@@ -458,6 +517,50 @@ function buildPartialUpdateFailureBody({
   if (snapshot) body.snapshot = snapshot;
 
   return body;
+}
+
+function normalizeGateDecisionPayload(payload) {
+  const decision = resolveGateDecisionValue(payload.decision);
+  return {
+    gateId: resolveGateId(payload),
+    decision,
+    reviewer: resolveGateReviewer(payload),
+    comment: resolveGateComment(payload, decision),
+    artifactsReviewed: resolveArtifactsReviewed(payload),
+  };
+}
+
+function resolveGateId(payload) {
+  if (typeof payload.gate_id === "string" && payload.gate_id.trim()) return payload.gate_id.trim();
+  if (typeof payload.gateId === "string" && payload.gateId.trim()) return payload.gateId.trim();
+  return "H1";
+}
+
+function resolveGateDecisionValue(value) {
+  if (value === "approved") return value;
+  if (value === "revision_requested" || value === "revision-requested") return "revision_requested";
+  return "revision_requested";
+}
+
+function resolveGateReviewer(payload) {
+  if (typeof payload.reviewer === "string" && payload.reviewer.trim()) return payload.reviewer.trim();
+  return "Campaign Owner";
+}
+
+function resolveGateComment(payload, decision) {
+  if (typeof payload.comment === "string" && payload.comment.trim()) return payload.comment.trim();
+  return decision === "approved"
+    ? "Approved in Panda prototype."
+    : "Revision requested from Panda before approval.";
+}
+
+function resolveArtifactsReviewed(payload) {
+  const raw = Array.isArray(payload.artifacts_reviewed)
+    ? payload.artifacts_reviewed
+    : Array.isArray(payload.artifactsReviewed)
+    ? payload.artifactsReviewed
+    : [];
+  return raw.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim());
 }
 
 async function executeOrchestratorUpdates({ mode, supabase, result, campaignId, workspace, actor }) {

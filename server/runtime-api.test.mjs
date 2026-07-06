@@ -475,6 +475,124 @@ describe("runtime action executor", () => {
       }),
     ).rejects.toThrow("revision write failed");
   });
+
+  it("inserts an initial campaign plan row when Supabase has no existing plan", async () => {
+    const run = createDefaultRun();
+    const client = createFakeSupabaseClient({
+      campaigns: {
+        select: [{ data: { id: run.campaignId, name: run.name, brief: run.brief, phase: "planning", active_gate: "H1", owner_role: "Campaign Owner" }, error: null }],
+      },
+      campaign_plans: {
+        select: [{ data: [], error: null }],
+        insert: [{ data: null, error: null }],
+      },
+      object_revisions: {
+        insert: [{ data: null, error: null }],
+      },
+      runtime_events: {
+        insert: [{ data: null, error: null }],
+      },
+    });
+
+    await executeRuntimeAction({
+      action: {
+        action: "update_campaign_plan",
+        note: "Seed the first campaign plan row from the runtime update.",
+        payload: {
+          heroProduct: "TE 2-22",
+          markets: ["China", "Japan", "Australia"],
+          locales: ["zh-CN", "ja-JP", "en-AU"],
+          kpis: ["Net sales"],
+        },
+      },
+      campaignId: run.campaignId,
+      workspace: "campaign-planning",
+      actor: "campaign-planning-specialist",
+      supabase: client.client,
+    });
+
+    expect(client.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: "campaigns",
+          op: "select",
+          filters: [["eq", "id", run.campaignId]],
+        }),
+        expect.objectContaining({
+          table: "campaign_plans",
+          op: "insert",
+          payload: expect.objectContaining({
+            campaign_id: run.campaignId,
+            version: 1,
+            hero_product: "TE 2-22",
+            markets: ["China", "Japan", "Australia"],
+            locales: ["zh-CN", "ja-JP", "en-AU"],
+            kpis: ["Net sales"],
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("persists gate decisions and advances the campaign phase in Supabase mode", async () => {
+    const run = createDefaultRun({ phase: "content" });
+    const client = createFakeSupabaseClient({
+      campaigns: {
+        select: [{ data: { id: run.campaignId, name: run.name, brief: run.brief, phase: "content", active_gate: "H2", owner_role: "Campaign Owner" }, error: null }],
+        update: [{ data: null, error: null }],
+      },
+      gate_decisions: {
+        insert: [{ data: null, error: null }],
+      },
+      runtime_events: {
+        insert: [{ data: null, error: null }],
+      },
+    });
+
+    const result = await executeRuntimeAction({
+      action: {
+        action: "create_gate_decision",
+        note: "Approve H2 and move the campaign into rollout.",
+        payload: {
+          gateId: "H2",
+          decision: "approved",
+          reviewer: "Vincent",
+          comment: "Ready for rollout.",
+          artifactsReviewed: ["artifact-1"],
+        },
+      },
+      campaignId: run.campaignId,
+      workspace: "content",
+      actor: "Vincent",
+      supabase: client.client,
+    });
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0].type).toBe("gate_decision");
+    expect(client.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: "gate_decisions",
+          op: "insert",
+          payload: expect.objectContaining({
+            campaign_id: run.campaignId,
+            gate: "H2",
+            decision: "approved",
+            reviewer: "Vincent",
+            comment: "Ready for rollout.",
+          }),
+        }),
+        expect.objectContaining({
+          table: "campaigns",
+          op: "update",
+          payload: expect.objectContaining({
+            phase: "rollout",
+            active_gate: "H3",
+          }),
+        }),
+      ]),
+    );
+  });
 });
 
 describe("agent runtime messages", () => {

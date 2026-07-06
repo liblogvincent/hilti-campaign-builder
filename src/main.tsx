@@ -62,6 +62,7 @@ import {
   displayCampaignSummary,
   draftSpecialistAgentResponse,
   GateId,
+  gateApprovalReadiness,
   navigationItems,
   nextPhase,
   normalizeServerUpdates,
@@ -134,6 +135,7 @@ function App() {
   const [rolloutObjectRecords, setRolloutObjectRecords] = useState<Record<string, RolloutWorkObject[]>>({});
   const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, CampaignRuntimeSnapshot>>(() => runtimeSnapshotsFromWorkspace(initialWorkspace));
   const [runtimeSnapshotEvidence, setRuntimeSnapshotEvidence] = useState<Record<string, boolean>>(() => runtimeSnapshotEvidenceFromWorkspace(initialWorkspace));
+  const [gateBusy, setGateBusy] = useState(false);
 
   const run = workspace.campaigns.find((campaign) => campaign.campaignId === workspace.activeCampaignId) ?? workspace.campaigns[0];
   const runtimeSnapshotHasVisibleEvidence = runtimeSnapshotEvidence[run.campaignId] ?? false;
@@ -156,6 +158,16 @@ function App() {
   const generatedRolloutObjects = useMemo(() => createRolloutWorkObjectsFromContent(contentObjects), [contentObjects]);
   const rolloutObjects = rolloutObjectRecords[run.campaignId] ?? generatedRolloutObjects;
   const activeRun = runtimeSnapshot ? { ...run, gateDecisions: activeGateDecisions } : run;
+  const gateReadiness = useMemo(
+    () =>
+      gateApprovalReadiness({
+        phase: run.phase,
+        planningObjects,
+        contentObjects,
+        rolloutObjects,
+      }),
+    [contentObjects, planningObjects, rolloutObjects, run.phase],
+  );
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(workspace));
@@ -666,7 +678,20 @@ function App() {
     void askGlobalPanda(prompt);
   }
 
-  function approveGate() {
+  function syncRuntimeSnapshot(snapshotRaw: unknown) {
+    if (!runtimeSnapshotHasEvidence(snapshotRaw)) return false;
+    const snapshot = normalizeCampaignSnapshot(snapshotRaw);
+    const snapshotCampaignId = runtimeSnapshotCampaignId(snapshotRaw, run.campaignId);
+    setRuntimeSnapshots((current) => ({ ...current, [snapshotCampaignId]: snapshot }));
+    setRuntimeSnapshotEvidence((current) => ({ ...current, [snapshotCampaignId]: true }));
+    updateRun((current) => ({
+      ...current,
+      snapshot: snapshotRaw as any,
+    }));
+    return true;
+  }
+
+  function applyApprovedGateLocally({ mirrorRuntimeSnapshot }: { mirrorRuntimeSnapshot: boolean }) {
     const gateId = (phaseGate?.id ?? activePhase.gate) as GateId;
     const reviewed = run.artifacts.filter((artifact) => artifact.phase === run.phase).map((artifact) => artifact.id);
     const timestamp = new Date().toISOString();
@@ -692,31 +717,33 @@ function App() {
       ],
       updatedAt: timestamp
     }));
-    setRuntimeSnapshots((current) => {
-      const snapshot = current[run.campaignId];
-      if (!snapshot) return current;
-      return {
-        ...current,
-        [run.campaignId]: {
-          ...snapshot,
-          gateDecisions: [
-            ...snapshot.gateDecisions.filter((decision) => !(decision.gateId === gateId && decision.decision === "approved")),
-            {
-              gateId,
-              decision: "approved",
-              reviewer,
-              comment: gateId === "H3" ? "Publish authorization granted for held candidates. External connector still requires live credentials." : "Approved in Panda prototype.",
-              artifactsReviewed: reviewed,
-              timestamp
-            }
-          ]
-        }
-      };
-    });
+    if (mirrorRuntimeSnapshot) {
+      setRuntimeSnapshots((current) => {
+        const snapshot = current[run.campaignId];
+        if (!snapshot) return current;
+        return {
+          ...current,
+          [run.campaignId]: {
+            ...snapshot,
+            gateDecisions: [
+              ...snapshot.gateDecisions.filter((decision) => !(decision.gateId === gateId && decision.decision === "approved")),
+              {
+                gateId,
+                decision: "approved",
+                reviewer,
+                comment: gateId === "H3" ? "Publish authorization granted for held candidates. External connector still requires live credentials." : "Approved in Panda prototype.",
+                artifactsReviewed: reviewed,
+                timestamp
+              }
+            ]
+          }
+        };
+      });
+    }
     addMessage(run.campaignId, { role: "system", text: `${gateId} approved by ${reviewer}. I moved the campaign to ${currentPhaseMeta(nextPhase(run.phase)).label}.` });
   }
 
-  function requestRevision() {
+  function applyRevisionGateLocally({ mirrorRuntimeSnapshot }: { mirrorRuntimeSnapshot: boolean }) {
     const gateId = (phaseGate?.id ?? activePhase.gate) as GateId;
     const timestamp = new Date().toISOString();
     updateRun((current) => ({
@@ -728,28 +755,101 @@ function App() {
       nextActions: ["Tell Panda what to revise", "Run phase again", "Re-open gate packet"],
       updatedAt: timestamp
     }));
-    setRuntimeSnapshots((current) => {
-      const snapshot = current[run.campaignId];
-      if (!snapshot) return current;
-      return {
-        ...current,
-        [run.campaignId]: {
-          ...snapshot,
-          gateDecisions: [
-            ...snapshot.gateDecisions,
-            {
-              gateId,
-              decision: "revision_requested",
-              reviewer,
-              comment: "Revision requested from Panda before approval.",
-              artifactsReviewed: run.artifacts.filter((artifact) => artifact.phase === run.phase).map((artifact) => artifact.id),
-              timestamp
-            }
-          ]
-        }
-      };
-    });
+    if (mirrorRuntimeSnapshot) {
+      setRuntimeSnapshots((current) => {
+        const snapshot = current[run.campaignId];
+        if (!snapshot) return current;
+        return {
+          ...current,
+          [run.campaignId]: {
+            ...snapshot,
+            gateDecisions: [
+              ...snapshot.gateDecisions,
+              {
+                gateId,
+                decision: "revision_requested",
+                reviewer,
+                comment: "Revision requested from Panda before approval.",
+                artifactsReviewed: run.artifacts.filter((artifact) => artifact.phase === run.phase).map((artifact) => artifact.id),
+                timestamp
+              }
+            ]
+          }
+        };
+      });
+    }
     addMessage(run.campaignId, { role: "system", text: `${gateId} revision requested. Tell me what to change and I will rerun the phase.` });
+  }
+
+  async function persistGateDecision(decision: "approved" | "revision_requested") {
+    const gateId = (phaseGate?.id ?? activePhase.gate) as GateId;
+    const comment =
+      decision === "approved"
+        ? gateId === "H3"
+          ? "Publish authorization granted for held candidates. External connector still requires live credentials."
+          : "Approved in Panda prototype."
+        : "Revision requested from Panda before approval.";
+
+    setGateBusy(true);
+    try {
+      const response = await fetch("/api/gate-decision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          campaign_id: run.campaignId,
+          gate_id: gateId,
+          decision,
+          reviewer,
+          comment,
+          artifacts_reviewed: run.artifacts.filter((artifact) => artifact.phase === run.phase).map((artifact) => artifact.id),
+        }),
+      });
+      const packet = await response.json();
+      if (!response.ok) {
+        addMessage(run.campaignId, {
+          role: "system",
+          text: packet?.details
+            ? `I could not persist ${gateId}: ${packet.details}`
+            : `I could not persist ${gateId}.`,
+        });
+        return;
+      }
+
+      const hasSnapshot = syncRuntimeSnapshot(packet.snapshot);
+      if (decision === "approved") {
+        applyApprovedGateLocally({ mirrorRuntimeSnapshot: !hasSnapshot });
+      } else {
+        applyRevisionGateLocally({ mirrorRuntimeSnapshot: !hasSnapshot });
+      }
+      if (typeof packet.warning === "string" && packet.warning.trim()) {
+        addMessage(run.campaignId, { role: "system", text: packet.warning.trim() });
+      }
+    } catch (error) {
+      addMessage(run.campaignId, {
+        role: "system",
+        text: error instanceof Error ? `I could not persist ${gateId}: ${error.message}` : `I could not persist ${gateId}.`,
+      });
+    } finally {
+      setGateBusy(false);
+    }
+  }
+
+  async function approveGate() {
+    const gateId = (phaseGate?.id ?? activePhase.gate) as GateId;
+    if (!phaseGate || gateApproved || gateBusy) return;
+    if (!gateReadiness.ready) {
+      addMessage(run.campaignId, {
+        role: "system",
+        text: `${gateId} is not ready yet. ${gateReadiness.reason}`,
+      });
+      return;
+    }
+    await persistGateDecision("approved");
+  }
+
+  async function requestRevision() {
+    if (!phaseGate || gateBusy) return;
+    await persistGateDecision("revision_requested");
   }
 
   function downloadRunRecord() {
@@ -903,6 +1003,8 @@ function App() {
               phaseGate={phaseGate}
               reviewer={reviewer}
               gateApproved={gateApproved}
+              gateBusy={gateBusy}
+              gateReadiness={gateReadiness}
               onReviewerChange={setReviewer}
               onApproveGate={approveGate}
               onRequestRevision={requestRevision}
@@ -2653,6 +2755,8 @@ function GatePanel({
   phaseGate,
   reviewer,
   gateApproved,
+  gateBusy,
+  gateReadiness,
   onReviewerChange,
   onApproveGate,
   onRequestRevision
@@ -2661,6 +2765,8 @@ function GatePanel({
   phaseGate?: CampaignRun["currentGate"];
   reviewer: string;
   gateApproved: boolean;
+  gateBusy: boolean;
+  gateReadiness: { ready: boolean; reason: string };
   onReviewerChange: (value: string) => void;
   onApproveGate: () => void;
   onRequestRevision: () => void;
@@ -2669,10 +2775,17 @@ function GatePanel({
   return (
     <div className="gateInline">
       <strong>{phaseGate?.id ?? activePhase.gate}</strong>
-      <span>{phaseGate?.recommendation ?? "Roll-up gate becomes ready when required work objects are approved."}</span>
+      <span>{phaseGate?.recommendation ?? gateReadiness.reason}</span>
       <input value={reviewer} onChange={(event) => onReviewerChange(event.target.value)} />
-      <button className="approve" onClick={onApproveGate} disabled={!phaseGate || gateApproved}><Check size={16} /> {gateApproved ? "Signed" : "Approve Gate"}</button>
-      <button className="secondary" onClick={onRequestRevision} disabled={!phaseGate}>Revise</button>
+      <button
+        className="approve"
+        onClick={onApproveGate}
+        disabled={!phaseGate || gateApproved || gateBusy || !gateReadiness.ready}
+        title={!gateReadiness.ready ? gateReadiness.reason : undefined}
+      >
+        <Check size={16} /> {gateApproved ? "Signed" : gateBusy ? "Saving" : "Approve Gate"}
+      </button>
+      <button className="secondary" onClick={onRequestRevision} disabled={!phaseGate || gateBusy}>Revise</button>
     </div>
   );
 }

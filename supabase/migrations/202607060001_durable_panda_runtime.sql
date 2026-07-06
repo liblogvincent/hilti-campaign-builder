@@ -191,6 +191,44 @@ values (
 )
 on conflict (id) do nothing;
 
+insert into public.campaign_plans (
+  campaign_id,
+  version,
+  name,
+  hero_product,
+  markets,
+  locales,
+  audience,
+  budget,
+  timeline,
+  channels,
+  kpis,
+  assumptions,
+  updated_by
+)
+values (
+  'camp_04',
+  1,
+  'Q4 DACH SIW 6AT-A22 paid-media campaign',
+  'SIW 6AT-A22',
+  '["DE","AT","CH"]'::jsonb,
+  '["de-DE","de-AT","de-CH","fr-CH"]'::jsonb,
+  '["Contractors","Specifiers"]'::jsonb,
+  'EUR 50k',
+  'Q4 launch window; no auto-publish before H3 approval.',
+  '[
+    {"id":"paid-media","name":"Paid Media","owner":"Paid Media","objective":"Drive demand and qualified HOL traffic.","requiredAssets":["Search ad headline","CTA","Paid social primary text"],"rolloutTarget":"Paid Media"},
+    {"id":"email","name":"Email","owner":"Email TA","objective":"Nurture known audiences.","requiredAssets":["Hero section","Subject line","Preview text","Locale variant"],"rolloutTarget":"SFMC"},
+    {"id":"hol-landing-page","name":"HOL Landing Page","owner":"HOL","objective":"Convert traffic with product proof, offer, and next-step CTA.","requiredAssets":["Opening section","Value proposition","CTA module"],"rolloutTarget":"Contentful"},
+    {"id":"organic-hn","name":"Organic / HN","owner":"Content / Creative","objective":"Support launch visibility through owned social and HN placements.","requiredAssets":["Social post","HN short hook"],"rolloutTarget":"Sprinklr"},
+    {"id":"banner","name":"Banner","owner":"HOL","objective":"Promote launch offer from relevant Hilti web placements.","requiredAssets":["Hardcoded banner copy"],"rolloutTarget":"Contentful"}
+  ]'::jsonb,
+  '["Qualified HOL visits","H3 publish readiness without auto-publish"]'::jsonb,
+  '["Agent-generated plan normalized by Panda."]'::jsonb,
+  'panda-runtime'
+)
+on conflict (campaign_id, version) do nothing;
+
 create or replace function public.persist_agent_turn(
   p_campaign_id text,
   p_workspace text,
@@ -203,7 +241,7 @@ create or replace function public.persist_agent_turn(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_thread public.agent_threads%rowtype;
@@ -211,6 +249,11 @@ declare
   v_agent_message public.agent_messages%rowtype;
   v_runtime_event public.runtime_events%rowtype;
 begin
+  if coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role'
+     and current_user not in ('postgres', 'supabase_admin') then
+    raise exception 'persist_agent_turn is restricted to service-role runtime calls';
+  end if;
+
   insert into public.agent_threads (
     campaign_id,
     workspace,
@@ -304,3 +347,9 @@ begin
   );
 end;
 $$;
+
+revoke execute on function public.persist_agent_turn(text, text, text, text, text, text, uuid) from public;
+revoke execute on function public.persist_agent_turn(text, text, text, text, text, text, uuid) from anon;
+revoke execute on function public.persist_agent_turn(text, text, text, text, text, text, uuid) from authenticated;
+grant execute on function public.persist_agent_turn(text, text, text, text, text, text, uuid) to service_role;
+alter function public.persist_agent_turn(text, text, text, text, text, text, uuid) owner to postgres;

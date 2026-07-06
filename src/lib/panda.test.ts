@@ -31,6 +31,7 @@ import {
   currentPhaseMeta,
   defaultUserRole,
   draftSpecialistAgentResponse,
+  gateApprovalReadiness,
   homeRouteAfterCampaignLaunch,
   isHomeCampaignCreationIntent,
   navigationItems,
@@ -971,6 +972,28 @@ describe("panda run model", () => {
     expect(readiness.blocked).toBe(0);
     expect(readiness.lanes).toContain("Contentful");
     expect(readiness.sourceObjects).toBe(content.length);
+  });
+
+  it("requires all active content objects to be approved before H2 gate approval is ready", () => {
+    const plan = campaignPlanForRun(createDefaultRun());
+    const content = createContentWorkObjectsFromRequirements(contentRequirementsFromPlan(plan));
+
+    const blocked = gateApprovalReadiness({
+      phase: "content",
+      planningObjects: [],
+      contentObjects: content,
+      rolloutObjects: [],
+    });
+    expect(blocked.ready).toBe(false);
+    expect(blocked.reason).toContain("Approve every active content object");
+
+    const approved = gateApprovalReadiness({
+      phase: "content",
+      planningObjects: [],
+      contentObjects: content.map((item) => ({ ...item, status: "approved" as const })),
+      rolloutObjects: [],
+    });
+    expect(approved.ready).toBe(true);
   });
 
   it("normalizes valid server specialist updates", () => {

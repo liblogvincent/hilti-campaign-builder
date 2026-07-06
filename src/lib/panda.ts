@@ -563,6 +563,13 @@ export type PlanningReadiness = {
   pct: number;
 };
 
+export type GateApprovalReadiness = {
+  ready: boolean;
+  reason: string;
+  approved: number;
+  total: number;
+};
+
 export type ObjectWorkspaceReadiness = {
   approved: number;
   total: number;
@@ -1830,6 +1837,55 @@ export function campaignPlanningReadiness(objects: PlanningWorkObject[]): Planni
   };
 }
 
+export function gateApprovalReadiness({
+  phase,
+  planningObjects,
+  contentObjects,
+  rolloutObjects,
+}: {
+  phase: PhaseId;
+  planningObjects: PlanningWorkObject[];
+  contentObjects: ContentWorkObject[];
+  rolloutObjects: RolloutWorkObject[];
+}): GateApprovalReadiness {
+  if (phase === "planning") {
+    const readiness = campaignPlanningReadiness(planningObjects);
+    return buildGateApprovalReadiness(
+      readiness.approved === readiness.total && readiness.total > 0 && readiness.blocked === 0 && readiness.revision === 0,
+      readiness.approved,
+      readiness.total,
+      "Approve every H1 planning object before signing the gate.",
+    );
+  }
+
+  if (phase === "content") {
+    const readiness = contentWorkspaceReadiness(contentObjects);
+    return buildGateApprovalReadiness(
+      readiness.approved === readiness.total && readiness.total > 0 && readiness.blocked === 0 && readiness.revision === 0,
+      readiness.approved,
+      readiness.total,
+      "Approve every active content object before signing H2.",
+    );
+  }
+
+  if (phase === "rollout") {
+    const readiness = rolloutWorkspaceReadiness(rolloutObjects);
+    return buildGateApprovalReadiness(
+      readiness.approved === readiness.total && readiness.total > 0 && readiness.blocked === 0 && readiness.revision === 0,
+      readiness.approved,
+      readiness.total,
+      "Approve every active rollout lane before signing H3.",
+    );
+  }
+
+  return {
+    ready: true,
+    reason: "H4 review has no object-level approval blockers in this prototype.",
+    approved: 0,
+    total: 0,
+  };
+}
+
 export function applyPlanningInstruction(objects: PlanningWorkObject[], instruction: string): PlanningWorkObject[] {
   const updates = planningUpdatesFromInstruction(objects, instruction);
   if (!updates.length) return objects;
@@ -2253,6 +2309,15 @@ export function rolloutWorkspaceReadiness(objects: RolloutWorkObject[]): Rollout
     pct: total ? Math.round((approved / total) * 100) : 0,
     lanes: objects.map((item) => item.lane),
     sourceObjects: new Set(objects.flatMap((item) => item.sourceContentIds)).size
+  };
+}
+
+function buildGateApprovalReadiness(ready: boolean, approved: number, total: number, blockedReason: string): GateApprovalReadiness {
+  return {
+    ready,
+    reason: ready ? "Gate is ready for approval." : blockedReason,
+    approved,
+    total,
   };
 }
 
