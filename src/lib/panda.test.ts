@@ -38,6 +38,7 @@ import {
   restoreAppView,
   phaseIndex,
   progressForCampaign,
+  progressTaskDetailRoute,
   rolloutWorkspaceReadiness,
   phases,
   skillHubSummary,
@@ -425,6 +426,14 @@ describe("panda run model", () => {
       "Optimize"
     ]);
     expect(progress.myTasks.length).toBeGreaterThan(0);
+  });
+
+  it("routes progress detail actions to the relevant workflow workspace", () => {
+    expect(progressTaskDetailRoute("Review H1 readiness")).toBe("campaign-planning");
+    expect(progressTaskDetailRoute("Review channel copy, Figma mapping, and claims")).toBe("content-planning");
+    expect(progressTaskDetailRoute("Approve content pieces by channel")).toBe("content");
+    expect(progressTaskDetailRoute("Prepare SFMC email and journey evidence")).toBe("rollout");
+    expect(progressTaskDetailRoute("Review H4 performance recommendations")).toBe("optimize");
   });
 
   it("defines Skills as mock knowledge and tool integration capabilities", () => {

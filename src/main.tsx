@@ -72,6 +72,7 @@ import {
   PlanningReadiness,
   PlanningWorkObject,
   progressForCampaign,
+  progressTaskDetailRoute,
   RolloutWorkObject,
   rolloutWorkspaceReadiness,
   restoreAppView,
@@ -721,7 +722,7 @@ function App() {
               onOpenSkills={() => setView("skills")}
             />
           )}
-          {view === "progress" && <ProgressView run={run} completion={completion} />}
+          {view === "progress" && <ProgressView run={run} completion={completion} onNavigate={setView} />}
           {view === "skills" && <SkillsView />}
           {view === "content" && (
             <ContentWorkspace
@@ -1003,7 +1004,7 @@ function HomeLauncher({
   );
 }
 
-function ProgressView({ run, completion }: { run: CampaignRun; completion: number }) {
+function ProgressView({ run, completion, onNavigate }: { run: CampaignRun; completion: number; onNavigate: (target: AppView) => void }) {
   const progress = progressForCampaign(run, defaultUserRole);
   return (
     <div className="progressPage">
@@ -1024,37 +1025,45 @@ function ProgressView({ run, completion }: { run: CampaignRun; completion: numbe
           <div className="workflowStatus">
             {progress.workflowStatus.map((item) => (
               <article className={item.status} key={item.id}>
-                <b>{item.label}</b>
-                <small>{item.gate} · {item.owner}</small>
-                <span>{item.status}</span>
+                <div className="progressItemTop">
+                  <div>
+                    <b>{item.label}</b>
+                    <small>{item.gate} · {item.owner}</small>
+                  </div>
+                  <span>{item.status}</span>
+                </div>
                 <p>{item.nextTask}</p>
+                <button className="detailButton" onClick={() => onNavigate(item.id)}>Detail <ChevronRight size={14} /></button>
               </article>
             ))}
           </div>
         </Panel>
 
         <Panel title="My Tasks" icon={<BadgeCheck size={18} />}>
-          <TaskList tasks={progress.myTasks} />
+          <TaskList tasks={progress.myTasks} onDetail={(task) => onNavigate(progressTaskDetailRoute(task, defaultUserRole))} />
         </Panel>
 
         <Panel title="Team Tasks" icon={<Layers3 size={18} />}>
           <div className="teamTasks">
             {progress.teamTasks.map((task) => (
               <article className={task.status} key={`${task.owner}-${task.task}`}>
-                <b>{task.owner}</b>
-                <span>{task.task}</span>
-                <small>{task.status}</small>
+                <div>
+                  <b>{task.owner}</b>
+                  <span>{task.task}</span>
+                  <small>{task.status}</small>
+                </div>
+                <button className="detailButton compact" onClick={() => onNavigate(progressTaskDetailRoute(task.task, task.owner))}>Detail <ChevronRight size={14} /></button>
               </article>
             ))}
           </div>
         </Panel>
 
         <Panel title="Blocked / Needs Input" icon={<Flag size={18} />}>
-          <TaskList tasks={progress.blockers} />
+          <TaskList tasks={progress.blockers} onDetail={(task) => onNavigate(progressTaskDetailRoute(task))} />
         </Panel>
 
         <Panel title="Panda Running Tasks" icon={<Bot size={18} />}>
-          <TaskList tasks={progress.pandaTasks} />
+          <TaskList tasks={progress.pandaTasks} onDetail={(task) => onNavigate(progressTaskDetailRoute(task))} />
         </Panel>
       </div>
     </div>
@@ -2464,10 +2473,15 @@ function GatePanel({
   );
 }
 
-function TaskList({ tasks }: { tasks: string[] }) {
+function TaskList({ tasks, onDetail }: { tasks: string[]; onDetail?: (task: string) => void }) {
   return (
     <div className="taskList">
-      {tasks.map((task) => <span key={task}>{task}</span>)}
+      {tasks.map((task) => (
+        <span key={task} className={onDetail ? "taskWithDetail" : undefined}>
+          <span>{task}</span>
+          {onDetail && <button className="detailButton compact" onClick={() => onDetail(task)}>Detail <ChevronRight size={14} /></button>}
+        </span>
+      ))}
     </div>
   );
 }

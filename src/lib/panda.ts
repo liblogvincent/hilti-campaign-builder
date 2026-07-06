@@ -1226,6 +1226,16 @@ export function progressForCampaign(run: CampaignRun, role: UserRole = defaultUs
   };
 }
 
+export function progressTaskDetailRoute(task: string, owner?: UserRole): AppView {
+  const text = `${owner ?? ""} ${task}`.toLowerCase();
+  if (/\b(h4|optimize|performance|learning|knowledge promotion)\b/.test(text)) return "optimize";
+  if (/\b(h3|rollout|publish|contentful|sprinklr|sfmc|utm|journey|email evidence|paid-media qa)\b/.test(text)) return "rollout";
+  if (/\b(figma|requirements|creative concept|storyboard|content planning|cross-channel)\b/.test(text)) return "content-planning";
+  if (/\b(copy|claims|claim|content pieces|content object|channel copy)\b/.test(text)) return "content";
+  if (/\b(h1|campaign planning|plan|objective|audience|budget|kpi|strategy|brief|missing input)\b/.test(text)) return "campaign-planning";
+  return "progress";
+}
+
 export function skillCapabilityItems(): SkillCapability[] {
   return [
     {
