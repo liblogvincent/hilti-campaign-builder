@@ -45,6 +45,13 @@ Done.
 ## Task 8 Runtime Snapshot Evidence Gate Fix Report
 - Files changed: `src/main.tsx`, `src/lib/panda.ts`, `src/lib/panda.test.ts`, `.superpowers/sdd/task-8-report.md`
 - Tests run: `npm test -- src/lib/panda.test.ts` - passed; `npm test` - passed; `npm run build` - passed
-- Commit hash: `20eb64caed734362ee25c5ad8abfac79f1f8c5c8`
+- Commit hash: `503368c6f9d5d35bd5887af05c0026b03042972e`
 - Self-review: runtime snapshots now hydrate only when `runtimeSnapshotHasEvidence(rawSnapshot)` is true; persisted workspace snapshots use the same evidence gate; local replay suppression now follows evidence, `no_replay`, or `unavailable_after_commit`; and the unused `runtimeSnapshot` prop was removed from `CampaignPlanningWorkspace`.
 - Concerns: if orchestrator payloads change their evidence shape, the shared helper will need to be extended so empty snapshots still stay out of the live UI.
+
+## Task 8 Runtime Snapshot Stale Evidence Fix Report
+- Files changed: `src/main.tsx`, `src/lib/panda.ts`, `src/lib/panda.test.ts`, `.superpowers/sdd/task-8-report.md`
+- Tests run: `npm test -- src/lib/panda.test.ts` - passed; `npm test` - passed; `npm run build` - passed
+- Commit hash: pending
+- Self-review: a later empty or malformed runtime snapshot now clears the active campaign runtime snapshot and evidence flags without deleting local overlays, so stale evidence-backed snapshots stop hydrating the UI. Runtime snapshot ids now accept prototype campaign ids only, falling back to the active campaign id for malformed strings.
+- Concerns: campaign id validation is intentionally prototype-scoped to `camp_*` ids; broaden it if the backend switches to UUID campaign ids.

@@ -191,7 +191,9 @@ export function runtimeSnapshotCampaignId(raw: unknown, fallbackCampaignId: stri
     stringValue(record.campaignId) ||
     stringValue(record.campaign_id);
 
-  return candidate && candidate !== "campaign-unknown" ? candidate : fallbackCampaignId;
+  return candidate && candidate !== "campaign-unknown" && /^camp_[a-z0-9_-]+$/i.test(candidate)
+    ? candidate
+    : fallbackCampaignId;
 }
 
 export function runtimeSnapshotHasEvidence(raw: unknown): boolean {

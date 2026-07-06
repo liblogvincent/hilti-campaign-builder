@@ -859,6 +859,7 @@ describe("panda run model", () => {
   it("keeps the active campaign id when a runtime snapshot id is malformed", () => {
     expect(runtimeSnapshotCampaignId({ campaign: { id: "" } }, "camp_04")).toBe("camp_04");
     expect(runtimeSnapshotCampaignId({ campaign: { id: "campaign-unknown" } }, "camp_04")).toBe("camp_04");
+    expect(runtimeSnapshotCampaignId({ campaign: { id: "oops-123" } }, "camp_04")).toBe("camp_04");
     expect(runtimeSnapshotCampaignId({ campaign: { id: "camp_05" } }, "camp_04")).toBe("camp_05");
   });
 

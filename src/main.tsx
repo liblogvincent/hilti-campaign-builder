@@ -309,6 +309,7 @@ function App() {
       const packet = (await response.json()) as PandaOrchestratorResponse;
       const serverUpdates = normalizeServerUpdates(packet.updates);
       let serverApplied = false;
+      const hasRuntimeSnapshot = Boolean(packet.snapshot);
       const snapshotHasEvidence = runtimeSnapshotHasEvidence(packet.snapshot);
       const suppressLocalReplay = shouldSuppressLocalReplay(packet);
       if (snapshotHasEvidence) {
@@ -345,6 +346,20 @@ function App() {
           return next;
         });
         serverApplied = true;
+      } else if (hasRuntimeSnapshot) {
+        setRuntimeSnapshots((current) => {
+          if (!Object.prototype.hasOwnProperty.call(current, run.campaignId)) return current;
+          const next = { ...current };
+          delete next[run.campaignId];
+          return next;
+        });
+        setRuntimeSnapshotEvidence((current) => {
+          if (!Object.prototype.hasOwnProperty.call(current, run.campaignId)) return current;
+          const next = { ...current };
+          delete next[run.campaignId];
+          return next;
+        });
+        updateRun((current) => ({ ...current, snapshot: undefined }));
       }
       if (!suppressLocalReplay) {
         for (const update of serverUpdates) {
