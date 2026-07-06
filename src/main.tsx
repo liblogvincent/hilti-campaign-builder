@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import {
   AgentMessage,
-  agentModeForPhase,
   applyContentPlanningInstruction,
   applyPlanningInstruction,
   AppView,
@@ -82,7 +81,6 @@ import {
   LeadershipFeedbackProposal,
   PlanPreviewSlide,
   simulatedPlanDeckFilename,
-  visibleWorkspaceMessages,
   WorklogEntry,
   WorkObjectStatus,
   workspaceAgentMessageKey
@@ -649,7 +647,6 @@ function App() {
   const selectedPhase = phaseViewMap[view] ?? run.phase;
   const contentAgentKey = workspaceAgentMessageKey(run.campaignId, "content");
   const workflowAgentKey = workspaceAgentMessageKey(run.campaignId, view);
-  const sharedCampaignMessages = workspace.messages[run.campaignId] ?? [];
 
   return (
     <main className="appFrame">
@@ -727,7 +724,7 @@ function App() {
           {view === "content" && (
             <ContentWorkspace
               run={run}
-              messages={visibleWorkspaceMessages(sharedCampaignMessages, workspaceAgentMessages[contentAgentKey] ?? [])}
+              messages={workspaceAgentMessages[contentAgentKey] ?? []}
               busy={busy || Boolean(workspaceAgentBusy[contentAgentKey])}
               agentInput={agentInput}
               contentObjects={contentObjects}
@@ -756,7 +753,7 @@ function App() {
               contentObjects={contentObjects}
               rolloutObjects={rolloutObjects}
               busy={busy || Boolean(workspaceAgentBusy[workflowAgentKey])}
-              messages={visibleWorkspaceMessages(sharedCampaignMessages, workspaceAgentMessages[workflowAgentKey] ?? [])}
+              messages={workspaceAgentMessages[workflowAgentKey] ?? []}
               onRun={(instruction) => runPhase(instruction)}
               onAsk={(targetView, question) => askWorkspacePanda(targetView, question)}
               onApplyContentPlanningInstruction={applyContentPlanningInstructionToWorkspace}
@@ -1199,7 +1196,6 @@ function ContentWorkspace({
         title="Content Panda"
         subtitle={`Consumes Content Planning matrix · ${readiness.approved}/${readiness.total} approved`}
         busy={busy}
-        mode={agentModeForPhase("content")}
         agentInput={agentInput}
         messages={messages}
         suggestions={workflowSuggestionsForView("content")}
@@ -1414,7 +1410,6 @@ function WorkflowShell({
         title={`${label} Panda`}
         subtitle={handoff.agentSubtitle}
         busy={busy}
-        mode={agentModeForPhase(phase)}
         agentInput={workflowAgentInput}
         messages={messages}
         suggestions={suggestions}
@@ -2293,7 +2288,6 @@ function AgentPanel({
   title,
   subtitle,
   busy,
-  mode,
   agentInput,
   messages,
   suggestions = [],
@@ -2304,7 +2298,6 @@ function AgentPanel({
   title: string;
   subtitle: string;
   busy: boolean;
-  mode: "Plan" | "Build";
   agentInput: string;
   messages: AgentMessage[];
   suggestions?: Array<{ label: string; prompt: string }>;
@@ -2394,13 +2387,9 @@ function AgentPanel({
         <div className="composerToolbar">
           <input ref={fileRef} type="file" multiple onChange={(event) => addAttachments(event.target.files)} />
           <div className="composerTools">
-            <button title="Attach file" onClick={() => fileRef.current?.click()}><Plus size={15} /></button>
-            <button title="Use evidence"><Paperclip size={14} /></button>
-            <button title="Ask for ideas"><Sparkles size={14} /></button>
-          </div>
-          <div className="composerModeToggle" role="group" aria-label="Agent work mode">
-            <button className={mode === "Plan" ? "selected" : ""} onClick={() => onAgentInputChange(agentInput || "Plan the next best action for this workspace.")}>Plan</button>
-            <button className={mode === "Build" ? "selected" : ""} onClick={() => onAgentInputChange(agentInput || "Build the next gate-ready work object.")}>Build</button>
+            <button title="Upload file" aria-label="Upload file" onClick={() => fileRef.current?.click()}><Plus size={15} /></button>
+            <button title="Use evidence" aria-label="Use evidence" onClick={() => onAgentInputChange(agentInput || "Use the available campaign evidence for this workspace answer.")}><Paperclip size={14} /></button>
+            <button title="Use skills" aria-label="Use skills" onClick={() => onAgentInputChange(agentInput || "Use the relevant Panda skills for this workspace.")}><Sparkles size={14} /></button>
           </div>
           <select className="modelSelectCompact" aria-label="Model placeholder" defaultValue="deepseek" title="DeepSeek model">
             <option value="deepseek">DS</option>

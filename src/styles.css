@@ -4686,7 +4686,7 @@ footer {
 
 .composerToolbar {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: 1fr auto auto;
   width: 100%;
   min-width: 0;
   align-items: center;
@@ -4695,8 +4695,7 @@ footer {
   border-top: 1px solid #f0f1f3;
 }
 
-.composerTools,
-.composerModeToggle {
+.composerTools {
   display: inline-flex;
   align-items: center;
   min-width: 0;
@@ -4719,42 +4718,13 @@ footer {
   color: #5b6266;
 }
 
-.composerModeToggle {
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: stretch;
-  padding: 2px;
-  border: 1px solid #e5e8eb;
-  border-radius: 10px;
-  background: #f6f7f8;
-}
-
-.composerToolbar .composerTools button,
-.composerToolbar .composerModeToggle button {
+.composerToolbar .composerTools button {
   grid-column: auto;
   grid-row: auto;
 }
 
-.composerModeToggle button {
-  flex: 1 1 0;
-  min-height: 26px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #6c7378;
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.composerModeToggle button.selected {
-  background: #fff;
-  color: var(--hilti);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-}
-
 .composerToolbar select {
-  grid-column: 3;
+  grid-column: 2;
   grid-row: 1;
   width: 52px;
   min-width: 0;
@@ -4769,7 +4739,7 @@ footer {
 }
 
 .composerToolbar .sendRound {
-  grid-column: 4;
+  grid-column: 3;
   grid-row: 1;
   width: auto;
   min-width: 72px;
