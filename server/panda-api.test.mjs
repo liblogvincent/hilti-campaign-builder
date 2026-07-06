@@ -4,6 +4,7 @@ import { handleAgent, handleHealth, handleIntegrationPackage, handleOrchestrator
 import { callJsonAgent, resolveProviderConfig, parseJsonObject } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
 import { createAgentMessageEvent, createGateDecisionEvent, createObjectPatchEvent, createRuntimeEvent } from "./runtime-events.mjs";
+import { canUseSupabase, runtimeMode } from "./supabase-client.mjs";
 
 describe("ai transport", () => {
   it("uses fixture mode when no provider key is available", () => {
@@ -76,6 +77,23 @@ describe("ai transport", () => {
     expect(result.warning).toBe(
       "DeepSeek returned malformed JSON; Panda normalized it into a safe gate packet.",
     );
+  });
+});
+
+describe("runtime mode boundary", () => {
+  it("falls back to local when supabase is selected without credentials", () => {
+    expect(runtimeMode({ PANDA_RUNTIME_MODE: "supabase" })).toBe("local");
+  });
+
+  it("uses supabase mode when explicitly configured", () => {
+    const env = {
+      PANDA_RUNTIME_MODE: "supabase",
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role",
+    };
+
+    expect(runtimeMode(env)).toBe("supabase");
+    expect(canUseSupabase(env)).toBe(true);
   });
 });
 

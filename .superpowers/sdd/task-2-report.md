@@ -15,7 +15,7 @@
 - Added `canUseSupabase`, `runtimeMode`, and `createSupabaseServerClient` helpers in `server/supabase-client.mjs`.
 - Added runtime constants and assertion helpers in `server/runtime-schema.mjs`.
 - Added `server/runtime-api.test.mjs` covering local/supabase mode behavior and runtime schema checks.
-- `server/panda-api.test.mjs` was not modified, as the Task 2 brief’s test scope was satisfied without requiring changes there.
+- `server/panda-api.test.mjs` was updated to cover the runtime-mode boundary from `supabase-client.mjs` as requested by the reviewer.
 
 ### Test command/output summary
 - `npm test -- server/runtime-api.test.mjs`
@@ -24,7 +24,7 @@
   - Result: 4 files / 109 tests passed.
 
 ### Commit
-- `def9f30`
+- `7a9d2a5`
 
 ### Self-review notes
 - Implementations match the exact snippets in the brief.
@@ -33,4 +33,12 @@
 
 ### Concerns
 - None.
+
+### Follow-up fix (runtime mode boundary coverage)
+- Added a focused `runtime mode boundary` block to `server/panda-api.test.mjs`.
+- Added assertions that:
+  - `runtimeMode({ PANDA_RUNTIME_MODE: "supabase" })` falls back to `"local"` when credentials are missing.
+  - `runtimeMode(...)` returns `"supabase"` and `canUseSupabase(...)` is true when Supabase env is fully configured.
+- This closes the reviewer finding that `server/panda-api.test.mjs` was left untouched despite being explicitly listed in the brief.
+- Commit: 7a9d2a5
 
