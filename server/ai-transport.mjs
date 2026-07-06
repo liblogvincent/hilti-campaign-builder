@@ -55,19 +55,30 @@ export async function callJsonAgent({ payload, systemPrompt, fallback, normalize
 }
 
 async function callVercelAiSdk({ config, payload, systemPrompt }) {
-  const { generateText } = await import("ai");
-  const { createOpenAI } = await import("@ai-sdk/openai");
-  const deepseek = createOpenAI({
-    apiKey: config.apiKey,
-    baseURL: `${config.baseUrl.replace(/\/$/, "")}/v1`,
-  });
-  const result = await generateText({
-    model: deepseek(config.model),
-    system: systemPrompt,
-    prompt: JSON.stringify(payload),
-    temperature: 0.2,
-  });
-  return { ok: true, text: result.text };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+
+  try {
+    const { generateText } = await import("ai");
+    const { createOpenAI } = await import("@ai-sdk/openai");
+    const deepseek = createOpenAI({
+      apiKey: config.apiKey,
+      baseURL: `${config.baseUrl.replace(/\/$/, "")}/v1`,
+    });
+    const result = await generateText({
+      model: deepseek(config.model),
+      system: systemPrompt,
+      prompt: JSON.stringify(payload),
+      temperature: 0.2,
+      abortSignal: controller.signal,
+    });
+    return { ok: true, text: result?.text || "{}" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, warning: `DeepSeek Vercel AI SDK transport failed: ${message.slice(0, 160)}` };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function callOpenAiStyle({ config, payload, systemPrompt, fetchImpl }) {

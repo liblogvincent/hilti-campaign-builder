@@ -27,6 +27,7 @@ describe("ai transport", () => {
   it("uses fixture mode when no provider key is available", () => {
     const config = resolveProviderConfig({});
     expect(config.mode).toBe("fixture");
+    expect(config.transport).toBe("fixture");
   });
 
   it("extracts JSON from a model response with surrounding text", () => {
@@ -74,6 +75,8 @@ describe("ai transport", () => {
   });
 
   it("uses the Vercel AI SDK path when transport is vercel-ai", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
     const fetchImpl = vi.fn(async () => {
       throw new Error("fetch path should not be used");
     });
@@ -92,21 +95,48 @@ describe("ai transport", () => {
       fetchImpl,
     });
 
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 20000);
+    expect(clearTimeoutSpy).toHaveBeenCalled();
     expect(createOpenAiMock).toHaveBeenCalledWith({
       apiKey: "sk-test",
       baseURL: "https://api.deepseek.com/v1",
     });
-    expect(generateTextMock).toHaveBeenCalledWith({
+    expect(generateTextMock).toHaveBeenCalledWith(expect.objectContaining({
       model: "mock:deepseek-chat",
       system: "Test prompt",
       prompt: JSON.stringify({ phase: "planning" }),
       temperature: 0.2,
-    });
+      abortSignal: expect.any(AbortSignal),
+    }));
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(result).toEqual({
       mode: "deepseek",
       answer: "from-sdk",
       transport: "vercel-ai",
+    });
+
+    setTimeoutSpy.mockRestore();
+    clearTimeoutSpy.mockRestore();
+  });
+
+  it("falls back safely when the Vercel AI SDK call fails", async () => {
+    generateTextMock.mockRejectedValueOnce(new Error("sdk exploded"));
+
+    await expect(callJsonAgent({
+      payload: { phase: "planning" },
+      systemPrompt: "Test prompt",
+      fallback: { answer: "fallback" },
+      normalize: (data, _payload, mode) => ({ mode, ...data }),
+      env: {
+        PANDA_AI_TRANSPORT: "vercel-ai",
+        DEEPSEEK_API_KEY: "sk-test",
+        DEEPSEEK_BASE_URL: "https://api.deepseek.com",
+        DEEPSEEK_MODEL: "deepseek-chat",
+      },
+    })).resolves.toEqual({
+      mode: "fixture",
+      answer: "fallback",
+      warning: "DeepSeek Vercel AI SDK transport failed: sdk exploded",
     });
   });
 
