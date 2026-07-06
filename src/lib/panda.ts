@@ -110,6 +110,8 @@ export type PandaOrchestratorResponse = {
   updates?: ServerSpecialistUpdate[];
   events?: Array<Record<string, unknown>>;
   snapshot?: PandaCampaignSnapshot;
+  snapshot_status?: "unavailable_after_commit";
+  no_replay?: boolean;
 };
 
 export type CampaignRun = {

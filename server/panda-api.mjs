@@ -523,9 +523,11 @@ async function executeOrchestratorUpdates({ mode, supabase, result, campaignId, 
       ok: true,
       result: {
         ...result,
+        updates: [],
         events: committedEvents,
         warning: appendWarning(result, `Durable runtime updates committed, but snapshot refresh failed: ${details}`),
         snapshot_status: "unavailable_after_commit",
+        no_replay: true,
         committed_update_count: committedUpdates.length,
       },
     };

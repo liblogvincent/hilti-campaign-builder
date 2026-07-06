@@ -294,6 +294,7 @@ function App() {
       const serverUpdates = normalizeServerUpdates(packet.updates);
       let serverApplied = false;
       const hasRuntimeSnapshot = Boolean(packet.snapshot?.plan);
+      const suppressLocalReplay = hasRuntimeSnapshot || packet.no_replay || packet.snapshot_status === "unavailable_after_commit";
       if (hasRuntimeSnapshot) {
         updateRun((current) => ({
           ...current,
@@ -325,7 +326,7 @@ function App() {
         });
         serverApplied = true;
       }
-      if (!hasRuntimeSnapshot) {
+      if (!suppressLocalReplay) {
         for (const update of serverUpdates) {
           if (update.action === "update_planning_object" && targetView === "campaign-planning") {
             serverApplied = applyCampaignPlanningInstructionToWorkspace(update.note) || serverApplied;

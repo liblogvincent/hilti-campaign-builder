@@ -991,9 +991,11 @@ describe("panda api handlers", () => {
 
     const body = JSON.parse(res.body);
     expect(res.status).toBe(200);
+    expect(body.updates).toEqual([]);
     expect(body.events).toHaveLength(1);
     expect(body.snapshot).toBeUndefined();
     expect(body.snapshot_status).toBe("unavailable_after_commit");
+    expect(body.no_replay).toBe(true);
     expect(body.committed_update_count).toBe(1);
     expect(body.warning).toContain("updates committed");
     expect(body.warning).toContain("snapshot unavailable");
