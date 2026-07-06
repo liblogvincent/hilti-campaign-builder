@@ -298,6 +298,30 @@ function App() {
           ...current,
           snapshot: packet.snapshot,
         }));
+        setPlanningObjectRecords((current) => {
+          if (!Object.prototype.hasOwnProperty.call(current, run.campaignId)) return current;
+          const next = { ...current };
+          delete next[run.campaignId];
+          return next;
+        });
+        setContentRequirementRecords((current) => {
+          if (!Object.prototype.hasOwnProperty.call(current, run.campaignId)) return current;
+          const next = { ...current };
+          delete next[run.campaignId];
+          return next;
+        });
+        setContentObjectRecords((current) => {
+          if (!Object.prototype.hasOwnProperty.call(current, run.campaignId)) return current;
+          const next = { ...current };
+          delete next[run.campaignId];
+          return next;
+        });
+        setRolloutObjectRecords((current) => {
+          if (!Object.prototype.hasOwnProperty.call(current, run.campaignId)) return current;
+          const next = { ...current };
+          delete next[run.campaignId];
+          return next;
+        });
         serverApplied = true;
       }
       for (const update of serverUpdates) {
