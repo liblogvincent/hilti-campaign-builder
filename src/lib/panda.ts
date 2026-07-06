@@ -905,14 +905,19 @@ export function campaignConversationKey(campaignId: string) {
 }
 
 export function visibleWorkspaceMessages(shared: AgentMessage[], local: AgentMessage[]) {
-  const seen = new Set<string>();
-  return [...shared, ...local].filter((message) => {
-    const key = `${message.role}:${message.text}`;
-    if (seen.has(message.id) || seen.has(key)) return false;
-    seen.add(message.id);
-    seen.add(key);
-    return true;
-  });
+  return compactAgentMessages([...shared, ...local]);
+}
+
+export function compactAgentMessages<T extends { id: string; role: string; text: string }>(messages: T[]) {
+  const byKey = new Map<string, T>();
+  for (const message of messages) {
+    byKey.set(`${message.role}:${normalizeMessageText(message.text)}`, message);
+  }
+  return Array.from(byKey.values());
+}
+
+function normalizeMessageText(text: string) {
+  return text.trim().replace(/\s+/g, " ");
 }
 
 function routeIntent(text: string): AppView | undefined {

@@ -25,6 +25,7 @@ import {
   campaignConversationKey,
   classifyHomeIntent,
   contentPlanningBridgeReadiness,
+  compactAgentMessages,
   simulatedPlanDeckFilename,
   currentPhaseMeta,
   defaultUserRole,
@@ -191,6 +192,16 @@ describe("panda run model", () => {
     ];
 
     expect(visibleWorkspaceMessages(shared, local).map((message) => message.id)).toEqual(["brief", "home", "local"]);
+  });
+
+  it("compacts agent messages by normalized role and text", () => {
+    const messages = [
+      { id: "a", role: "agent" as const, text: "I created New campaign · TE30 AVR.", timestamp: "2026-07-06T01:00:00.000Z" },
+      { id: "b", role: "agent" as const, text: "I created   New campaign · TE30 AVR.", timestamp: "2026-07-06T01:00:01.000Z" },
+      { id: "c", role: "user" as const, text: "launch campaign", timestamp: "2026-07-06T01:00:02.000Z" }
+    ];
+
+    expect(compactAgentMessages(messages).map((message) => message.id)).toEqual(["b", "c"]);
   });
 
   it("builds a shared Panda campaign context packet for all agent surfaces", () => {

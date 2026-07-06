@@ -44,6 +44,7 @@ import {
   CampaignRun,
   CampaignWorkspace,
   classifyHomeIntent,
+  compactAgentMessages,
   ContentWorkObject,
   ContentPlanningApprovalStatus,
   ContentPlanningBridge,
@@ -688,6 +689,7 @@ function App() {
               onSubmit={submitHomePrompt}
               onOpenCampaign={(campaignId) => setWorkspace((current) => ({ ...current, activeCampaignId: campaignId }))}
               onOpenProgress={() => setView("progress")}
+              onOpenSkills={() => setView("skills")}
             />
           )}
           {view === "progress" && <ProgressView run={run} completion={completion} />}
@@ -900,7 +902,8 @@ function HomeLauncher({
   onPromptChange,
   onSubmit,
   onOpenCampaign,
-  onOpenProgress
+  onOpenProgress,
+  onOpenSkills
 }: {
   run: CampaignRun;
   prompt: string;
@@ -912,7 +915,9 @@ function HomeLauncher({
   onSubmit: () => void;
   onOpenCampaign: (campaignId: string) => void;
   onOpenProgress: () => void;
+  onOpenSkills: () => void;
 }) {
+  const visibleMessages = compactAgentMessages(messages).slice(-5);
   return (
     <div className="homePage">
       <section className="homeHero">
@@ -920,23 +925,30 @@ function HomeLauncher({
         <h1>Ask Panda what to do next.</h1>
         <p>Use Home as the orchestrator: ask a question, create a new campaign, update the current plan, or route work to a specialist workspace.</p>
         <div className="promptCard">
+          <div className="homeChatHeader">
+            <span className="agentAvatar"><Bot size={15} /></span>
+            <div>
+              <b>Panda</b>
+              <small>Orchestrator</small>
+            </div>
+          </div>
+          <div className="homeAgentTranscript">
+            {visibleMessages.map((message) => (
+              <article key={message.id} className={message.role === "agent" ? "agent" : "user"}>
+                <b>{message.role === "agent" ? "Panda" : "You"}</b>
+                <p>{message.text}</p>
+              </article>
+            ))}
+            {pandaBusy && <article className="agent thinking"><b>Panda</b><p>Working across the shared campaign context...</p></article>}
+          </div>
           <textarea value={prompt} onChange={(event) => onPromptChange(event.target.value)} placeholder="Ask a question, update the current campaign, or launch a new campaign..." />
           <div className="promptActions">
-            <button className="secondaryAction"><Plus size={18} /> Add skill/file</button>
+            <button className="secondaryAction" onClick={onOpenSkills}><Plus size={18} /> Add skill/file</button>
             <span className="orchestratorMode"><Bot size={15} /> Orchestrator</span>
             <button className="sendFab" onClick={onSubmit} disabled={busy || !prompt.trim()}>
               {busy ? <RefreshCw className="spin" size={20} /> : <Send size={20} />}
             </button>
           </div>
-        </div>
-        <div className="homeAgentTranscript">
-          {messages.slice(-4).map((message) => (
-            <article key={message.id} className={message.role === "agent" ? "agent" : "user"}>
-              <b>{message.role === "agent" ? "Panda" : "You"}</b>
-              <p>{message.text}</p>
-            </article>
-          ))}
-          {pandaBusy && <article className="agent"><b>Panda</b><p>Thinking across the shared campaign context...</p></article>}
         </div>
       </section>
 
