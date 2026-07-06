@@ -90,3 +90,5 @@ DEEPSEEK_MODEL=deepseek-chat
 ```
 
 Keep `PANDA_RUNTIME_MODE=local` for offline demo mode.
+
+For Vercel + Supabase deployment, see [docs/deployment/vercel-durable-runtime.md](docs/deployment/vercel-durable-runtime.md).
