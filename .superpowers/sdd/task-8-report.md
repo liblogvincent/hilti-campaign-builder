@@ -66,6 +66,6 @@ Done.
 ## Task 8 Runtime Snapshot Replay Base Fix Report
 - Files changed: `src/main.tsx`, `.superpowers/sdd/task-8-report.md`
 - Tests run: `npm test -- src/lib/panda.test.ts` - passed; `npm test` - passed; `npm run build` - passed
-- Commit hash: pending
+- Commit hash: `6c6e475`
 - Self-review: server update replay after an invalid runtime snapshot now rebases on local overlays or non-runtime generated fixture data instead of stale snapshot-derived arrays.
 - Concerns: this remains a React state-level guard; a future component/integration test could make the async replay path more explicit.
