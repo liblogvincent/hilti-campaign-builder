@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { runtimeMode, canUseSupabase, createSupabaseServerClient } from "./supabase-client.mjs";
 import { assertRuntimeStatus, normalizeWorkspace } from "./runtime-schema.mjs";
+import { createCampaignSnapshotFromFixture } from "./campaign-runtime.mjs";
+import { createDefaultRun, campaignPlanForRun, campaignPlanningObjectsFromPlan, contentRequirementsFromPlan } from "../src/lib/panda.ts";
 
 describe("runtime mode", () => {
   it("defaults to local runtime", () => {
@@ -37,5 +39,23 @@ describe("runtime schema helpers", () => {
 
   it("rejects invalid work object statuses", () => {
     expect(() => assertRuntimeStatus("published")).toThrow("Invalid runtime status");
+  });
+});
+
+describe("campaign snapshot runtime", () => {
+  it("creates a canonical snapshot from fixture state", () => {
+    const run = createDefaultRun();
+    const plan = campaignPlanForRun(run);
+    const snapshot = createCampaignSnapshotFromFixture({
+      run,
+      plan,
+      planningObjects: campaignPlanningObjectsFromPlan(plan),
+      contentRequirements: contentRequirementsFromPlan(plan),
+    });
+
+    expect(snapshot.campaign.id).toBe(run.campaignId);
+    expect(snapshot.plan.campaignId).toBe(run.campaignId);
+    expect(snapshot.workObjects.some((item) => item.workspace === "campaign-planning")).toBe(true);
+    expect(snapshot.contentRequirements.length).toBeGreaterThan(0);
   });
 });
