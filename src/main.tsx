@@ -346,7 +346,7 @@ function App() {
           return next;
         });
         serverApplied = true;
-      } else if (hasRuntimeSnapshot) {
+      } else if (hasRuntimeSnapshot || suppressLocalReplay) {
         setRuntimeSnapshots((current) => {
           if (!Object.prototype.hasOwnProperty.call(current, run.campaignId)) return current;
           const next = { ...current };

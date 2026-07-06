@@ -198,17 +198,17 @@ export function runtimeSnapshotCampaignId(raw: unknown, fallbackCampaignId: stri
 
 export function runtimeSnapshotHasEvidence(raw: unknown): boolean {
   const record = isRecord(raw) ? raw : {};
-  return [
-    record.events,
-    record.workObjects,
-    record.work_objects,
-    record.contentRequirements,
-    record.content_requirements,
-    record.gateDecisions,
-    record.gate_decisions,
-    record.agentThreads,
-    record.agent_threads
-  ].some(hasRuntimeRecords);
+  return (
+    hasRuntimeRecords(record.events, ["id", "type", "actor", "workspace"]) ||
+    hasRuntimeRecords(record.workObjects, ["id", "title", "status", "lane"]) ||
+    hasRuntimeRecords(record.work_objects, ["id", "title", "status", "lane"]) ||
+    hasRuntimeRecords(record.contentRequirements, ["id", "title", "channel", "assetType", "asset_type"]) ||
+    hasRuntimeRecords(record.content_requirements, ["id", "title", "channel", "assetType", "asset_type"]) ||
+    hasRuntimeRecords(record.gateDecisions, ["gateId", "gate_id", "decision", "reviewer"]) ||
+    hasRuntimeRecords(record.gate_decisions, ["gateId", "gate_id", "decision", "reviewer"]) ||
+    hasRuntimeRecords(record.agentThreads, ["id", "agentId", "agent_id", "workspace"]) ||
+    hasRuntimeRecords(record.agent_threads, ["id", "agentId", "agent_id", "workspace"])
+  );
 }
 
 export function runtimeSnapshotsFromWorkspace(workspace: CampaignWorkspace) {
@@ -2555,8 +2555,11 @@ function sentenceCase(value: string) {
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
-function hasRuntimeRecords(value: unknown): boolean {
-  return Array.isArray(value) && value.some(isRecord);
+function hasRuntimeRecords(value: unknown, evidenceKeys: string[]): boolean {
+  return Array.isArray(value) && value.some((item) => {
+    if (!isRecord(item)) return false;
+    return evidenceKeys.some((key) => Boolean(stringValue(item[key])));
+  });
 }
 
 export const backlogStories = [

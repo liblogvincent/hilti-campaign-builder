@@ -823,7 +823,10 @@ describe("panda run model", () => {
     expect(runtimeSnapshotHasEvidence({})).toBe(false);
     expect(runtimeSnapshotHasEvidence({ events: [] })).toBe(false);
     expect(runtimeSnapshotHasEvidence({ workObjects: [] })).toBe(false);
+    expect(runtimeSnapshotHasEvidence({ workObjects: [{}] })).toBe(false);
+    expect(runtimeSnapshotHasEvidence({ gateDecisions: [{}] })).toBe(false);
     expect(runtimeSnapshotHasEvidence({ events: [{ id: "evt_1" }] })).toBe(true);
+    expect(runtimeSnapshotHasEvidence({ workObjects: [{ id: "objective" }] })).toBe(true);
   });
 
   it("loads workspace runtime snapshots only when they have evidence", () => {
@@ -851,6 +854,7 @@ describe("panda run model", () => {
 
   it("suppresses local replay only for evidence, explicit no-replay, or commit-unavailable snapshots", () => {
     expect(shouldSuppressLocalReplay({ snapshot: {}, no_replay: false })).toBe(false);
+    expect(shouldSuppressLocalReplay({ snapshot: { workObjects: [{}] }, no_replay: false })).toBe(false);
     expect(shouldSuppressLocalReplay({ snapshot: { events: [{ id: "evt_1" }] }, no_replay: false })).toBe(true);
     expect(shouldSuppressLocalReplay({ snapshot: {}, no_replay: true })).toBe(true);
     expect(shouldSuppressLocalReplay({ snapshot: {}, snapshot_status: "unavailable_after_commit" })).toBe(true);
