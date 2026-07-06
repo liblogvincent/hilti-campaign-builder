@@ -142,11 +142,13 @@ function App() {
   const phaseGate = run.currentGate?.id === activePhase.gate ? run.currentGate : undefined;
   const activeGateDecisions = runtimeSnapshot?.gateDecisions ?? run.gateDecisions;
   const gateApproved = activeGateDecisions.some((decision) => decision.gateId === activePhase.gate && decision.decision === "approved");
-  const generatedCampaignPlan = useMemo(() => campaignPlanForRun(run), [run]);
+  const generatedCampaignPlan = useMemo(() => campaignPlanForRun({ ...run, snapshot: undefined }), [run]);
   const campaignPlan = runtimeSnapshot?.plan ?? generatedCampaignPlan;
+  const fallbackPlanningObjects = useMemo(() => campaignPlanningObjectsFromPlan(generatedCampaignPlan), [generatedCampaignPlan]);
   const generatedPlanningObjects = useMemo(() => campaignPlanningObjectsFromPlan(campaignPlan), [campaignPlan]);
   const planningObjects = planningObjectRecords[run.campaignId] ?? runtimeSnapshot?.workObjects ?? generatedPlanningObjects;
   const planningReadiness = useMemo(() => campaignPlanningReadiness(planningObjects), [planningObjects]);
+  const fallbackContentRequirements = useMemo(() => contentRequirementsFromPlan(generatedCampaignPlan), [generatedCampaignPlan]);
   const generatedContentRequirements = useMemo(() => contentRequirementsFromPlan(campaignPlan), [campaignPlan]);
   const contentRequirements = contentRequirementRecords[run.campaignId] ?? runtimeSnapshot?.contentRequirements ?? generatedContentRequirements;
   const generatedContentObjects = useMemo(() => createContentWorkObjectsFromRequirements(contentRequirements), [contentRequirements]);
@@ -221,18 +223,22 @@ function App() {
     }));
   }
 
-  function applyContentPlanningInstructionToWorkspace(instruction: string) {
-    const updatedRequirements = applyContentPlanningInstruction(contentRequirements, campaignPlan, instruction);
-    if (updatedRequirements === contentRequirements) return false;
+  function applyContentPlanningInstructionToWorkspace(
+    instruction: string,
+    baseRequirements = contentRequirements,
+    basePlan = campaignPlan
+  ) {
+    const updatedRequirements = applyContentPlanningInstruction(baseRequirements, basePlan, instruction);
+    if (updatedRequirements === baseRequirements) return false;
     const updatedObjects = createContentWorkObjectsFromRequirements(updatedRequirements);
     setContentRequirementRecords((current) => ({ ...current, [run.campaignId]: updatedRequirements }));
     setContentObjectRecords((current) => ({ ...current, [run.campaignId]: updatedObjects }));
     return true;
   }
 
-  function applyCampaignPlanningInstructionToWorkspace(instruction: string) {
-    const updatedObjects = applyPlanningInstruction(planningObjects, instruction);
-    if (updatedObjects === planningObjects) return false;
+  function applyCampaignPlanningInstructionToWorkspace(instruction: string, baseObjects = planningObjects) {
+    const updatedObjects = applyPlanningInstruction(baseObjects, instruction);
+    if (updatedObjects === baseObjects) return false;
     setPlanningObjectRecords((current) => ({ ...current, [run.campaignId]: updatedObjects }));
     return true;
   }
@@ -312,6 +318,13 @@ function App() {
       const hasRuntimeSnapshot = Boolean(packet.snapshot);
       const snapshotHasEvidence = runtimeSnapshotHasEvidence(packet.snapshot);
       const suppressLocalReplay = shouldSuppressLocalReplay(packet);
+      const replayShouldUseFallbackBase = hasRuntimeSnapshot && !snapshotHasEvidence;
+      const replayPlanningObjects = replayShouldUseFallbackBase
+        ? planningObjectRecords[run.campaignId] ?? fallbackPlanningObjects
+        : planningObjects;
+      const replayContentRequirements = replayShouldUseFallbackBase
+        ? contentRequirementRecords[run.campaignId] ?? fallbackContentRequirements
+        : contentRequirements;
       if (snapshotHasEvidence) {
         const snapshot = normalizeCampaignSnapshot(packet.snapshot);
         const snapshotCampaignId = runtimeSnapshotCampaignId(packet.snapshot, run.campaignId);
@@ -364,10 +377,12 @@ function App() {
       if (!suppressLocalReplay) {
         for (const update of serverUpdates) {
           if (update.action === "update_planning_object" && targetView === "campaign-planning") {
-            serverApplied = applyCampaignPlanningInstructionToWorkspace(update.note) || serverApplied;
+            serverApplied = applyCampaignPlanningInstructionToWorkspace(update.note, replayPlanningObjects) || serverApplied;
           }
           if (update.action === "update_content_requirements" && targetView === "content-planning") {
-            serverApplied = applyContentPlanningInstructionToWorkspace(update.note) || serverApplied;
+            serverApplied =
+              applyContentPlanningInstructionToWorkspace(update.note, replayContentRequirements, generatedCampaignPlan) ||
+              serverApplied;
           }
         }
       }
