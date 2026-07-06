@@ -61,10 +61,10 @@ export async function loadCampaignSnapshot({ campaignId, supabase, fixture }) {
   return {
     campaign: mapCampaign(campaign),
     plan: mapPlan(plans?.[0]),
-    workObjects: workObjects || [],
-    contentRequirements: contentRequirements || [],
-    gateDecisions: gateDecisions || [],
-    events: events || [],
+    workObjects: Array.isArray(workObjects) ? workObjects.map(mapWorkObject) : [],
+    contentRequirements: Array.isArray(contentRequirements) ? contentRequirements.map(mapContentRequirement) : [],
+    gateDecisions: Array.isArray(gateDecisions) ? gateDecisions.map(mapGateDecision) : [],
+    events: Array.isArray(events) ? events.map(mapRuntimeEvent) : [],
     agentThreads: [],
   };
 }
@@ -95,5 +95,72 @@ function mapPlan(row) {
     channels: row.channels,
     kpis: row.kpis,
     assumptions: row.assumptions,
+  };
+}
+
+function mapWorkObject(row) {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    workspace: row.workspace,
+    title: row.title,
+    lane: row.lane,
+    ownerRole: row.owner_role,
+    owner: row.owner_role,
+    status: row.status,
+    gate: row.gate,
+    copy: row.copy,
+    evidence: row.evidence,
+    source: row.source,
+    updatedBy: row.updated_by,
+    ownerId: row.owner_id,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapContentRequirement(row) {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    channel: row.channel,
+    assetType: row.asset_type,
+    title: row.title,
+    locale: row.locale,
+    ownerRole: row.owner_role,
+    owner: row.owner_role,
+    rolloutTarget: row.rollout_target,
+    status: row.status,
+    evidence: row.evidence,
+    updatedBy: row.updated_by,
+    ownerId: row.owner_id,
+    updatedAt: row.updated_at,
+    source: "Campaign Runtime",
+    compliance: "",
+  };
+}
+
+function mapGateDecision(row) {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    gateId: row.gate,
+    decision: row.decision === "revision-requested" ? "revision_requested" : row.decision,
+    reviewer: row.reviewer,
+    comment: row.comment,
+    artifactsReviewed: [],
+    timestamp: row.created_at,
+  };
+}
+
+function mapRuntimeEvent(row) {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    workspace: row.workspace,
+    type: row.type,
+    actor: row.actor,
+    ownerId: row.owner_id,
+    payload: row.payload,
+    timestamp: row.created_at,
   };
 }

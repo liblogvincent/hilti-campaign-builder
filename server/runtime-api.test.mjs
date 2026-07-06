@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runtimeMode, canUseSupabase, createSupabaseServerClient } from "./supabase-client.mjs";
 import { assertRuntimeStatus, normalizeWorkspace } from "./runtime-schema.mjs";
-import { createCampaignSnapshotFromFixture } from "./campaign-runtime.mjs";
+import { createCampaignSnapshotFromFixture, loadCampaignSnapshot } from "./campaign-runtime.mjs";
 import { createDefaultRun, campaignPlanForRun, campaignPlanningObjectsFromPlan, contentRequirementsFromPlan } from "../src/lib/panda.ts";
 
 describe("runtime mode", () => {
@@ -57,5 +57,148 @@ describe("campaign snapshot runtime", () => {
     expect(snapshot.plan.campaignId).toBe(run.campaignId);
     expect(snapshot.workObjects.some((item) => item.workspace === "campaign-planning")).toBe(true);
     expect(snapshot.contentRequirements.length).toBeGreaterThan(0);
+  });
+
+  it("maps snake_case supabase rows into camelCase snapshot fields", async () => {
+    const fakeSupabase = {
+      from(table) {
+        const datasets = {
+          campaigns: { data: { id: "camp_04", name: "Fixture Campaign", brief: "A brief", phase: "planning", active_gate: "H1", owner_role: "Campaign Owner", updated_at: "2026-07-06T00:00:00.000Z" }, error: null },
+          campaign_plans: {
+            data: [
+              {
+                campaign_id: "camp_04",
+                name: "Plan 1",
+                hero_product: "Product",
+                markets: [],
+                locales: [],
+                audience: [],
+                budget: "EUR 100",
+                timeline: "2 weeks",
+                channels: [],
+                kpis: [],
+                assumptions: [],
+              },
+            ],
+            error: null,
+          },
+          work_objects: {
+            data: [
+              {
+                id: "wo-1",
+                campaign_id: "camp_04",
+                workspace: "campaign-planning",
+                title: "Objectives",
+                lane: "Strategy",
+                owner_role: "Campaign Owner",
+                status: "draft",
+                gate: "H1",
+                copy: "",
+                evidence: [],
+                source: "CampaignPlan",
+                updated_at: "2026-07-06T00:00:01.000Z",
+              },
+            ],
+            error: null,
+          },
+          content_requirements: {
+            data: [
+              {
+                id: "cr-1",
+                campaign_id: "camp_04",
+                channel: "Email",
+                asset_type: "copy",
+                title: "Welcome sequence",
+                locale: "master",
+                owner_role: "Campaign Owner",
+                rollout_target: "Contentful",
+                status: "in-review",
+                evidence: [],
+                updated_at: "2026-07-06T00:00:02.000Z",
+              },
+            ],
+            error: null,
+          },
+          gate_decisions: {
+            data: [
+              {
+                id: 10,
+                campaign_id: "camp_04",
+                gate: "H1",
+                decision: "revision-requested",
+                reviewer: "Campaign Owner",
+                comment: "Needs revision",
+                created_at: "2026-07-06T00:00:03.000Z",
+              },
+            ],
+            error: null,
+          },
+          runtime_events: {
+            data: [
+              {
+                id: "ev-1",
+                campaign_id: "camp_04",
+                workspace: "campaign-planning",
+                type: "agent_message",
+                actor: "campaign-planning-specialist",
+                payload: { note: "ok" },
+                created_at: "2026-07-06T00:00:04.000Z",
+              },
+            ],
+            error: null,
+          },
+        };
+
+        const result = datasets[table] || { data: [], error: null };
+        const thenable = {
+          select() {
+            return thenable;
+          },
+          eq() {
+            return thenable;
+          },
+          order() {
+            return thenable;
+          },
+          limit() {
+            return thenable;
+          },
+          single() {
+            return Promise.resolve(result);
+          },
+          then(resolve, reject) {
+            return Promise.resolve(result).then(resolve, reject);
+          },
+        };
+        return thenable;
+      },
+    };
+
+    const snapshot = await loadCampaignSnapshot({ campaignId: "camp_04", supabase: fakeSupabase, fixture: null });
+
+    expect(snapshot.campaign.ownerRole).toBe("Campaign Owner");
+    expect(snapshot.campaign.updatedAt).toBe("2026-07-06T00:00:00.000Z");
+    expect(snapshot.plan.campaignId).toBe("camp_04");
+    expect(snapshot.workObjects[0]).toMatchObject({
+      campaignId: "camp_04",
+      ownerRole: "Campaign Owner",
+      owner: "Campaign Owner",
+    });
+    expect(snapshot.contentRequirements[0]).toMatchObject({
+      campaignId: "camp_04",
+      assetType: "copy",
+      rolloutTarget: "Contentful",
+      ownerRole: "Campaign Owner",
+    });
+    expect(snapshot.gateDecisions[0]).toMatchObject({
+      campaignId: "camp_04",
+      gateId: "H1",
+      decision: "revision_requested",
+      timestamp: "2026-07-06T00:00:03.000Z",
+    });
+    expect(snapshot.events[0]).toMatchObject({
+      campaignId: "camp_04",
+      timestamp: "2026-07-06T00:00:04.000Z",
+    });
   });
 });
