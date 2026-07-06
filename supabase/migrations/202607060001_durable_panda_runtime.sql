@@ -8,6 +8,7 @@ create table if not exists public.campaigns (
   active_gate text not null default 'H1',
   owner_role text not null default 'Campaign Owner',
   created_by uuid,
+  owner_id uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   archived_at timestamptz,
@@ -30,6 +31,7 @@ create table if not exists public.campaign_plans (
   kpis jsonb not null default '[]'::jsonb,
   assumptions jsonb not null default '[]'::jsonb,
   updated_by text not null default 'panda-runtime',
+  owner_id uuid,
   updated_at timestamptz not null default now(),
   unique (campaign_id, version),
   constraint campaign_plans_markets_array check (jsonb_typeof(markets) = 'array'),
@@ -53,6 +55,7 @@ create table if not exists public.work_objects (
   evidence jsonb not null default '[]'::jsonb,
   source text not null default 'PandaRuntime',
   updated_by text not null default 'panda-runtime',
+  owner_id uuid,
   updated_at timestamptz not null default now(),
   primary key (campaign_id, id),
   constraint work_objects_status_check check (status in ('draft','in-review','approved','revision-requested','blocked')),
@@ -72,6 +75,7 @@ create table if not exists public.content_requirements (
   status text not null default 'draft',
   evidence jsonb not null default '[]'::jsonb,
   updated_by text not null default 'panda-runtime',
+  owner_id uuid,
   updated_at timestamptz not null default now(),
   primary key (campaign_id, id),
   constraint content_requirements_status_check check (status in ('draft','in-review','approved','revision-requested','blocked'))
@@ -83,6 +87,7 @@ create table if not exists public.agent_threads (
   workspace text not null,
   agent_id text not null,
   visible_to_workspace boolean not null default true,
+  owner_id uuid,
   created_at timestamptz not null default now(),
   unique (campaign_id, workspace, agent_id)
 );
@@ -93,6 +98,7 @@ create table if not exists public.agent_messages (
   role text not null,
   text text not null,
   model_mode text not null default 'unknown',
+  owner_id uuid,
   created_at timestamptz not null default now(),
   constraint agent_messages_role_check check (role in ('user','agent','system','tool'))
 );
@@ -107,6 +113,7 @@ create table if not exists public.object_revisions (
   after_data jsonb not null default '{}'::jsonb,
   rationale text not null default '',
   actor text not null default 'panda-runtime',
+  owner_id uuid,
   created_at timestamptz not null default now()
 );
 
@@ -116,6 +123,7 @@ create table if not exists public.gate_decisions (
   gate text not null,
   decision text not null,
   reviewer text not null,
+  owner_id uuid,
   comment text not null default '',
   created_at timestamptz not null default now(),
   constraint gate_decisions_gate_check check (gate in ('H1','H2','H3','H4','H-C','H-legal')),
@@ -128,6 +136,7 @@ create table if not exists public.runtime_events (
   workspace text not null default 'global',
   type text not null,
   actor text not null default 'panda-runtime',
+  owner_id uuid,
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   constraint runtime_events_type_check check (type in ('agent_message','object_patch','gate_decision','audit','job_started','job_completed','job_failed'))
@@ -142,6 +151,7 @@ create table if not exists public.agent_jobs (
   status text not null default 'queued',
   input jsonb not null default '{}'::jsonb,
   output jsonb not null default '{}'::jsonb,
+  owner_id uuid,
   error text,
   created_at timestamptz not null default now(),
   started_at timestamptz,
