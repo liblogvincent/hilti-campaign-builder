@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { handleAgent, handleHealth, handleIntegrationPackage, handleOrchestrator, normalizeOrchestratorResponse } from "./panda-api.mjs";
 import { callJsonAgent, resolveProviderConfig, parseJsonObject } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
+import { createAgentMessageEvent, createGateDecisionEvent, createObjectPatchEvent, createRuntimeEvent } from "./runtime-events.mjs";
 
 describe("ai transport", () => {
   it("uses fixture mode when no provider key is available", () => {
@@ -313,6 +314,69 @@ describe("orchestrator response normalization", () => {
       "deepseek",
     );
     expect(result.updates[0].status).toBeUndefined();
+  });
+});
+
+describe("runtime event helpers", () => {
+  it("creates a normalized audit fallback event", () => {
+    const event = createRuntimeEvent({
+      type: "unknown",
+      campaignId: " camp_04 ",
+      workspace: "",
+      actor: "",
+      payload: "bad",
+      timestamp: "2026-07-06T00:00:00.000Z",
+    });
+
+    expect(event.type).toBe("audit");
+    expect(event.campaignId).toBe("camp_04");
+    expect(event.workspace).toBe("global");
+    expect(event.actor).toBe("panda-runtime");
+    expect(event.payload).toEqual({});
+    expect(event.timestamp).toBe("2026-07-06T00:00:00.000Z");
+  });
+
+  it("creates agent message events without leaking oversized text", () => {
+    const event = createAgentMessageEvent({
+      campaignId: "camp_04",
+      workspace: "campaign-planning",
+      role: "user",
+      text: ` ${"x".repeat(2100)} `,
+    });
+
+    expect(event.type).toBe("agent_message");
+    expect(event.payload.role).toBe("user");
+    expect(event.payload.text).toHaveLength(2000);
+  });
+
+  it("creates object patch events for specialist workspace changes", () => {
+    const event = createObjectPatchEvent({
+      campaignId: "camp_04",
+      workspace: "campaign-planning",
+      objectId: "channel-strategy",
+      action: "update_planning_object",
+      note: "Channel strategy completed in H1.",
+      patch: { status: "in-review" },
+    });
+
+    expect(event.type).toBe("object_patch");
+    expect(event.payload.objectId).toBe("channel-strategy");
+    expect(event.payload.patch).toEqual({ status: "in-review" });
+  });
+
+  it("creates gate decision events with safe defaults", () => {
+    const event = createGateDecisionEvent({
+      campaignId: "camp_04",
+      gateId: "H1",
+      decision: "publish",
+      reviewer: "Vincent",
+      comment: "Needs revision before approval.",
+    });
+
+    expect(event.type).toBe("gate_decision");
+    expect(event.workspace).toBe("gates");
+    expect(event.actor).toBe("Vincent");
+    expect(event.payload.decision).toBe("revision-requested");
   });
 });
 

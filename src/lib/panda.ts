@@ -898,8 +898,10 @@ export function classifyHomeIntent(prompt: string): HomeIntent {
     return { type: "update-campaign" };
   }
 
-  const hasProduct = /\b(te|siw|nur|bx|ag|pd|laser|drill|anchor|tool)\w*/i.test(text);
+  const productMatch = extractProductMention(prompt);
+  const hasProduct = Boolean(productMatch);
   const hasCampaignWord = /\bcampaign\b/.test(text);
+
   if (!hasProduct && !hasCampaignWord) return { type: "chat" };
 
   const hasCreationVerb = /\b(create|start|launch|build|plan)\b/.test(text);
@@ -1536,21 +1538,27 @@ export function applyPlanningInstruction(objects: PlanningWorkObject[], instruct
 
 function planningUpdatesFromInstruction(objects: Array<Pick<PlanningWorkObject, "id" | "title" | "copy">>, instruction: string): Extract<SpecialistAgentUpdate, { target: "planning_object" }>[] {
   const text = instruction.trim();
+  const normalized = text.toLowerCase();
   const productMatch = text.match(/\b(?:focus on|for|about|to)\s+([A-Z]{1,5}\d{1,3}(?:-\d{1,3})?|TE\d{2}(?:-\d{2})?|SIW\s*6AT-A22)\b/i);
   const product = productMatch?.[1]?.toUpperCase().replace(/\s+/g, " ");
   const mentionsMocn = /\bmocn\b/i.test(text);
-  const wantsUpdate = /\b(update|change|revise|adjust|edit|focus)\b/i.test(text);
-  if (!wantsUpdate && !product && !mentionsMocn) return [];
+  const wantsUpdate = /\b(update|change|revise|adjust|edit|focus|complete|completed|should be completed)\b/i.test(text);
+  const objectiveMatch = text.match(/campaign objective\s*:\s*([^.;\n]+)/i);
+  const kpiMatch = text.match(/\bkpi\s*:\s*([^.;\n]+)/i);
+  const mentionsChannelStrategy = /\bchannel\s+st(?:r)?ategy\b|\bchannel strategy\b/i.test(text);
+  if (!wantsUpdate && !product && !mentionsMocn && !objectiveMatch && !kpiMatch && !mentionsChannelStrategy) return [];
 
   const updates: Extract<SpecialistAgentUpdate, { target: "planning_object" }>[] = [];
   const objective = objects.find((item) => item.id === "campaign-objective");
-  if (objective && (product || wantsUpdate)) {
+  if (objective && (product || objectiveMatch || (wantsUpdate && normalized.includes("objective")))) {
     updates.push({
       target: "planning_object",
       id: objective.id,
       patch: {
-        status: "revision-requested",
-        copy: product
+        status: objectiveMatch ? "in-review" : "revision-requested",
+        copy: objectiveMatch
+          ? `Campaign objective: ${objectiveMatch[1].trim()}.`
+          : product
           ? `Revised draft objective: focus the campaign planning around ${product}, then validate audience, channel fit, KPIs, budget, and risk assumptions before H1 approval.`
           : `${objective.copy} Revised per Campaign Owner instruction before H1 approval.`,
         evidence: ["Campaign Owner instruction", "H1 planning revision"]
@@ -1567,6 +1575,32 @@ function planningUpdatesFromInstruction(objects: Array<Pick<PlanningWorkObject, 
         status: "revision-requested",
         copy: "Revised draft audience: prioritize MOCN audience needs and keep downstream content planning scoped to this segment until leadership confirms broader audiences.",
         evidence: ["Campaign Owner instruction", "MOCN audience revision"]
+      }
+    });
+  }
+
+  const kpi = objects.find((item) => item.id === "kpi-definition");
+  if (kpi && kpiMatch) {
+    updates.push({
+      target: "planning_object",
+      id: kpi.id,
+      patch: {
+        status: "in-review",
+        copy: `Primary KPI: ${kpiMatch[1].trim()}.`,
+        evidence: ["Campaign Owner instruction", "KPI definition update"]
+      }
+    });
+  }
+
+  const channelStrategy = objects.find((item) => item.id === "channel-strategy");
+  if (channelStrategy && mentionsChannelStrategy && /\bcomplete|completed|should be completed\b/i.test(text)) {
+    updates.push({
+      target: "planning_object",
+      id: channelStrategy.id,
+      patch: {
+        status: "in-review",
+        copy: `${channelStrategy.copy} Confirmed as an H1 campaign-planning deliverable before downstream content planning begins.`,
+        evidence: ["Campaign Owner instruction", "H1 channel strategy completion"]
       }
     });
   }
@@ -2337,9 +2371,18 @@ export function currentPhaseMeta(phase: PhaseId) {
 
 function inferCampaignName(brief: string) {
   const compact = brief.replace(/\s+/g, " ").trim();
-  if (!compact) return "Untitled Agentic E2E campaign";
-  const product = compact.match(/\b(SIW|TE|NURON|BX|PMD|HIT|EXO)[A-Z0-9 -]*/i)?.[0];
+  if (!compact) return "Untitled campaign";
+  const product = compact.match(/\b(SIW|TE|NURON|BX|PMD|HIT|EXO)[A-Z0-9 -]*/i)?.[0]?.trim();
   const market = compact.match(/\b(DACH|DE|AT|CH|EU|global|APAC|North America)\b/i)?.[0];
-  const prefix = market ? `${market.toUpperCase()} campaign` : "New campaign";
-  return product ? `${prefix} · ${product.trim()}` : `${prefix} · ${compact.slice(0, 48)}`;
+  const audience = compact.match(/\b(contractors?|installers?|specifiers?|MOCN|electricians?|plumbers?)\b/i)?.[0];
+  const parts: string[] = [];
+  if (product) parts.push(product);
+  if (market) parts.push(market.toUpperCase());
+  else if (audience) parts.push(audience.charAt(0).toUpperCase() + audience.slice(1));
+  if (parts.length === 0) {
+    // Fallback: first meaningful words from the brief
+    const words = compact.replace(/[^a-zA-Z0-9 ]/g, "").split(/\s+/).filter((w) => w.length > 2 && !/\b(the|and|for|with|this|that|from|will|have|has|been|campaign)\b/i.test(w));
+    return words.slice(0, 3).join(" ") || compact.slice(0, 48);
+  }
+  return parts.join(" · ");
 }

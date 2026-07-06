@@ -383,6 +383,28 @@ describe("panda run model", () => {
     expect(updated.every((item) => item.gate === "H1")).toBe(true);
   });
 
+  it("updates campaign objective and KPI from brief-like planning input", () => {
+    const objects = campaignPlanningObjectsFromPlan(campaignPlanForRun(createDefaultRun()));
+    const updated = applyPlanningInstruction(objects, "campaign objective: generate leads kpi: Net sales");
+    const objective = updated.find((item) => item.id === "campaign-objective");
+    const kpi = updated.find((item) => item.id === "kpi-definition");
+
+    expect(objective?.status).toBe("in-review");
+    expect(objective?.copy).toContain("generate leads");
+    expect(kpi?.status).toBe("in-review");
+    expect(kpi?.copy).toContain("Net sales");
+  });
+
+  it("marks channel strategy as an H1 planning deliverable when the owner says it should be completed there", () => {
+    const objects = campaignPlanningObjectsFromPlan(campaignPlanForRun(createDefaultRun()));
+    const updated = applyPlanningInstruction(objects, "channel stategy should be completed in campaign planning phase. here is I just give you a brief");
+    const channelStrategy = updated.find((item) => item.id === "channel-strategy");
+
+    expect(channelStrategy?.status).toBe("in-review");
+    expect(channelStrategy?.copy).toContain("H1 campaign-planning deliverable");
+    expect(channelStrategy?.evidence).toContain("H1 channel strategy completion");
+  });
+
   it("adds a MOCN audience content requirement from a content planning instruction", () => {
     const run = createDefaultRun();
     const plan = campaignPlanForRun(run);
