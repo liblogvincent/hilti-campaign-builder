@@ -114,6 +114,32 @@ export type AgentMessage = {
   timestamp: string;
 };
 
+export type HomeIntent =
+  | { type: "chat" }
+  | { type: "status" }
+  | { type: "create-campaign" }
+  | { type: "update-campaign" }
+  | { type: "route"; view: AppView };
+
+export type SpecialistAgentUpdate =
+  | {
+      target: "planning_object";
+      id: string;
+      patch: Partial<Pick<PlanningWorkObject, "status" | "copy" | "evidence">>;
+    }
+  | {
+      target: "content_requirements";
+      action: "replace";
+      requirements: ContentRequirement[];
+    };
+
+export type SpecialistAgentResponse = {
+  answer: string;
+  updates: SpecialistAgentUpdate[];
+  suggested_actions: string[];
+  route?: AppView;
+};
+
 export type CampaignWorkspace = {
   activeCampaignId: string;
   campaigns: CampaignRun[];
@@ -845,10 +871,21 @@ export function agentModeForPhase(phase: PhaseId): AgentWorkMode {
   return phase === "planning" ? "Plan" : "Build";
 }
 
-export function isHomeCampaignCreationIntent(prompt: string): boolean {
+export function classifyHomeIntent(prompt: string): HomeIntent {
   const text = prompt.trim().toLowerCase();
-  if (!text) return false;
-  return /\b(create|start|launch|build|plan)\b/.test(text) && /\bcampaign\b/.test(text);
+  if (!text) return { type: "chat" };
+  const route = routeIntent(text);
+  if (route) return { type: "route", view: route };
+  if (/\b(status|progress|blocked|blocker|missing|ready|where are we)\b/.test(text)) return { type: "status" };
+  if (/\b(update|change|revise|adjust|edit)\b/.test(text) && /\b(campaign|plan|planning|brief|objective|audience|kpi|budget|channel)\b/.test(text)) {
+    return { type: "update-campaign" };
+  }
+  if (/\b(create|start|launch|build|plan)\b/.test(text) && /\bcampaign\b/.test(text)) return { type: "create-campaign" };
+  return { type: "chat" };
+}
+
+export function isHomeCampaignCreationIntent(prompt: string): boolean {
+  return classifyHomeIntent(prompt).type === "create-campaign";
 }
 
 export function homeRouteAfterCampaignLaunch(prompt: string): AppView {
@@ -861,6 +898,34 @@ export function restoreAppView(value: string | null): AppView {
 
 export function workspaceAgentMessageKey(campaignId: string, view: AppView) {
   return `${campaignId}:${view}`;
+}
+
+export function campaignConversationKey(campaignId: string) {
+  return `${campaignId}:shared`;
+}
+
+export function visibleWorkspaceMessages(shared: AgentMessage[], local: AgentMessage[]) {
+  const seen = new Set<string>();
+  return [...shared, ...local].filter((message) => {
+    const key = `${message.role}:${message.text}`;
+    if (seen.has(message.id) || seen.has(key)) return false;
+    seen.add(message.id);
+    seen.add(key);
+    return true;
+  });
+}
+
+function routeIntent(text: string): AppView | undefined {
+  if (/\b(open|go to|show|route to)\b/.test(text)) {
+    if (text.includes("campaign planning") || text.includes("h1")) return "campaign-planning";
+    if (text.includes("content planning") || text.includes("cp1") || text.includes("cp4")) return "content-planning";
+    if (text.includes("content")) return "content";
+    if (text.includes("rollout") || text.includes("publish")) return "rollout";
+    if (text.includes("optimize") || text.includes("performance")) return "optimize";
+    if (text.includes("progress") || text.includes("status")) return "progress";
+    if (text.includes("skills")) return "skills";
+  }
+  return undefined;
 }
 
 export function buildAgentScope(view: AppView, selectedObjectId?: string): PandaAgentScope {
@@ -1016,6 +1081,39 @@ export function draftWorkspaceAgentAnswer(view: AppView, question: string, conte
     return `Optimize Panda: I will use the campaign worklog, gate decisions, and available performance evidence for ${gate}. DeepSeek is refining this answer in the background.`;
   }
   return `Panda: I am using the shared campaign context for ${context.campaign_name}. DeepSeek is refining this answer in the background.`;
+}
+
+export function draftSpecialistAgentResponse(view: AppView, question: string, context: PandaContextPacket): SpecialistAgentResponse {
+  if (view === "campaign-planning") {
+    const updates = planningUpdatesFromInstruction(context.planning_objects, question);
+    const changedTitles = updates.map((update) => context.planning_objects.find((item) => item.id === update.id)?.title || update.id);
+    return {
+      answer: changedTitles.length
+        ? `Campaign Planning Panda updated the H1 plan draft for ${context.campaign_name}: ${changedTitles.join(", ")}. No approval was taken; this is a planning revision for review.`
+        : `Campaign Planning Panda is staying in H1 plan editing mode for ${context.campaign_name}. I can revise objective, audience, KPIs, budget, channels, risks, and missing inputs without approving the gate.`,
+      updates,
+      suggested_actions: ["Review H1 plan changes", "Ask Panda to revise another planning object", "Prepare H1 packet when ready"],
+      route: "campaign-planning"
+    };
+  }
+  if (view === "content-planning") {
+    const updatedRequirements = applyContentPlanningInstruction(context.content_requirements as ContentRequirement[], context.campaign_plan, question);
+    const changed = updatedRequirements !== context.content_requirements;
+    return {
+      answer: changed
+        ? "Content Planning Panda updated the CP bridge requirements and kept the change scoped to Content Planning. Downstream Content objects should refresh from the revised matrix."
+        : draftWorkspaceAgentAnswer(view, question, context),
+      updates: changed ? [{ target: "content_requirements", action: "replace", requirements: updatedRequirements }] : [],
+      suggested_actions: ["Review CP1-CP4 package", "Open Requirements Matrix", "Prepare H2 after object approvals"],
+      route: "content-planning"
+    };
+  }
+  return {
+    answer: draftWorkspaceAgentAnswer(view, question, context),
+    updates: [],
+    suggested_actions: ["Review workspace status", "Ask Panda for the next scoped action"],
+    route: view
+  };
 }
 
 export function agentStackItems() {
@@ -1314,6 +1412,61 @@ export function campaignPlanningReadiness(objects: PlanningWorkObject[]): Planni
     revision,
     pct: total ? Math.round((approved / total) * 100) : 0
   };
+}
+
+export function applyPlanningInstruction(objects: PlanningWorkObject[], instruction: string): PlanningWorkObject[] {
+  const updates = planningUpdatesFromInstruction(objects, instruction);
+  if (!updates.length) return objects;
+  const byId = new Map(updates.map((update) => [update.id, update.patch]));
+  return objects.map((item) => {
+    const patch = byId.get(item.id);
+    if (!patch) return item;
+    return {
+      ...item,
+      ...patch,
+      evidence: patch.evidence ?? item.evidence
+    };
+  });
+}
+
+function planningUpdatesFromInstruction(objects: Array<Pick<PlanningWorkObject, "id" | "title" | "copy">>, instruction: string): Extract<SpecialistAgentUpdate, { target: "planning_object" }>[] {
+  const text = instruction.trim();
+  const productMatch = text.match(/\b(?:focus on|for|about|to)\s+([A-Z]{1,5}\d{1,3}(?:-\d{1,3})?|TE\d{2}(?:-\d{2})?|SIW\s*6AT-A22)\b/i);
+  const product = productMatch?.[1]?.toUpperCase().replace(/\s+/g, " ");
+  const mentionsMocn = /\bmocn\b/i.test(text);
+  const wantsUpdate = /\b(update|change|revise|adjust|edit|focus)\b/i.test(text);
+  if (!wantsUpdate && !product && !mentionsMocn) return [];
+
+  const updates: Extract<SpecialistAgentUpdate, { target: "planning_object" }>[] = [];
+  const objective = objects.find((item) => item.id === "campaign-objective");
+  if (objective && (product || wantsUpdate)) {
+    updates.push({
+      target: "planning_object",
+      id: objective.id,
+      patch: {
+        status: "revision-requested",
+        copy: product
+          ? `Revised draft objective: focus the campaign planning around ${product}, then validate audience, channel fit, KPIs, budget, and risk assumptions before H1 approval.`
+          : `${objective.copy} Revised per Campaign Owner instruction before H1 approval.`,
+        evidence: ["Campaign Owner instruction", "H1 planning revision"]
+      }
+    });
+  }
+
+  const audience = objects.find((item) => item.id === "target-audience");
+  if (audience && mentionsMocn) {
+    updates.push({
+      target: "planning_object",
+      id: audience.id,
+      patch: {
+        status: "revision-requested",
+        copy: "Revised draft audience: prioritize MOCN audience needs and keep downstream content planning scoped to this segment until leadership confirms broader audiences.",
+        evidence: ["Campaign Owner instruction", "MOCN audience revision"]
+      }
+    });
+  }
+
+  return updates;
 }
 
 export function contentRequirementsFromPlan(plan: CampaignPlan): ContentRequirement[] {

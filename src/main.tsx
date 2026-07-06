@@ -30,6 +30,7 @@ import {
   AgentMessage,
   agentModeForPhase,
   applyContentPlanningInstruction,
+  applyPlanningInstruction,
   AppView,
   buildLeadershipFeedbackProposal,
   buildContentPlanningBridge,
@@ -42,6 +43,7 @@ import {
   CampaignPlan,
   CampaignRun,
   CampaignWorkspace,
+  classifyHomeIntent,
   ContentWorkObject,
   ContentPlanningApprovalStatus,
   ContentPlanningBridge,
@@ -56,9 +58,8 @@ import {
   currentPhaseMeta,
   defaultUserRole,
   displayCampaignSummary,
-  draftWorkspaceAgentAnswer,
+  draftSpecialistAgentResponse,
   GateId,
-  isHomeCampaignCreationIntent,
   navigationItems,
   nextPhase,
   PandaAgentResponse,
@@ -78,6 +79,7 @@ import {
   LeadershipFeedbackProposal,
   PlanPreviewSlide,
   simulatedPlanDeckFilename,
+  visibleWorkspaceMessages,
   WorklogEntry,
   WorkObjectStatus,
   workspaceAgentMessageKey
@@ -184,8 +186,8 @@ function App() {
       campaignPlan,
       planningObjects,
       contentRequirements,
-      contentObjects,
-      rolloutObjects
+      contentObjects: targetView === "campaign-planning" ? [] : contentObjects,
+      rolloutObjects: targetView === "campaign-planning" ? [] : rolloutObjects
     });
   }
 
@@ -206,6 +208,13 @@ function App() {
     const updatedObjects = createContentWorkObjectsFromRequirements(updatedRequirements);
     setContentRequirementRecords((current) => ({ ...current, [run.campaignId]: updatedRequirements }));
     setContentObjectRecords((current) => ({ ...current, [run.campaignId]: updatedObjects }));
+    return true;
+  }
+
+  function applyCampaignPlanningInstructionToWorkspace(instruction: string) {
+    const updatedObjects = applyPlanningInstruction(planningObjects, instruction);
+    if (updatedObjects === planningObjects) return false;
+    setPlanningObjectRecords((current) => ({ ...current, [run.campaignId]: updatedObjects }));
     return true;
   }
 
@@ -230,29 +239,41 @@ function App() {
     let context = pandaContextFor(targetView);
     appendWorkspaceAgentMessage(targetView, { role: "user", text });
 
-    if (targetView === "content-planning") {
-      if (applyContentPlanningInstructionToWorkspace(text)) {
-        const updatedRequirements = applyContentPlanningInstruction(contentRequirements, campaignPlan, text);
-        const updatedObjects = createContentWorkObjectsFromRequirements(updatedRequirements);
-        context = buildPandaContextPacket({
-          run,
-          currentView: targetView,
-          currentPhase: phaseForView(targetView),
-          userRole: defaultUserRole,
-          campaignPlan,
-          planningObjects,
-          contentRequirements: updatedRequirements,
-          contentObjects: updatedObjects,
-          rolloutObjects: createRolloutWorkObjectsFromContent(updatedObjects)
-        });
-        appendWorkspaceAgentMessage(targetView, {
-          role: "agent",
-          text: "Content Planning Panda: Added a MOCN audience-only content requirement to the matrix. The downstream Content workspace now has a matching content object to build and review."
-        });
-      }
+    const specialistDraft = draftSpecialistAgentResponse(targetView, text, context);
+    if (targetView === "campaign-planning" && specialistDraft.updates.some((update) => update.target === "planning_object")) {
+      applyCampaignPlanningInstructionToWorkspace(text);
+      const updatedPlanningObjects = applyPlanningInstruction(planningObjects, text);
+      context = buildPandaContextPacket({
+        run,
+        currentView: targetView,
+        currentPhase: phaseForView(targetView),
+        userRole: defaultUserRole,
+        campaignPlan,
+        planningObjects: updatedPlanningObjects,
+        contentRequirements,
+        contentObjects: [],
+        rolloutObjects: []
+      });
     }
 
-    appendWorkspaceAgentMessage(targetView, { role: "agent", text: draftWorkspaceAgentAnswer(targetView, text, context) });
+    if (targetView === "content-planning" && specialistDraft.updates.some((update) => update.target === "content_requirements")) {
+      applyContentPlanningInstructionToWorkspace(text);
+      const updatedRequirements = applyContentPlanningInstruction(contentRequirements, campaignPlan, text);
+      const updatedObjects = createContentWorkObjectsFromRequirements(updatedRequirements);
+      context = buildPandaContextPacket({
+        run,
+        currentView: targetView,
+        currentPhase: phaseForView(targetView),
+        userRole: defaultUserRole,
+        campaignPlan,
+        planningObjects,
+        contentRequirements: updatedRequirements,
+        contentObjects: updatedObjects,
+        rolloutObjects: createRolloutWorkObjectsFromContent(updatedObjects)
+      });
+    }
+
+    appendWorkspaceAgentMessage(targetView, { role: "agent", text: specialistDraft.answer });
     setWorkspaceAgentBusy((current) => ({ ...current, [key]: true }));
 
     try {
@@ -328,7 +349,7 @@ function App() {
       ]
     }));
     setHomePrompt("");
-    setGlobalPandaOpen(true);
+    setGlobalPandaOpen(false);
     setGlobalPandaMessages((items) => [
       ...items,
       {
@@ -423,7 +444,7 @@ function App() {
   async function askGlobalPanda(questionOverride?: string) {
     const question = (questionOverride ?? globalPandaInput).trim();
     if (!question) return;
-    setGlobalPandaOpen(true);
+    if (view !== "home") setGlobalPandaOpen(true);
     setGlobalPandaInput("");
     setGlobalPandaBusy(true);
     setGlobalPandaMessages((items) => [...items, { id: crypto.randomUUID(), role: "user", text: question }]);
@@ -458,13 +479,38 @@ function App() {
   function submitHomePrompt() {
     const prompt = homePrompt.trim();
     if (!prompt) return;
+    const intent = classifyHomeIntent(prompt);
 
-    if (isHomeCampaignCreationIntent(prompt)) {
+    if (intent.type === "create-campaign") {
       createCampaignFromPrompt(prompt);
+      return;
+    }
+    if (intent.type === "route") {
+      setHomePrompt("");
+      setView(intent.view);
+      return;
+    }
+    if (intent.type === "update-campaign") {
+      setHomePrompt("");
+      addMessage(run.campaignId, { role: "user", text: prompt });
+      void askWorkspacePanda("campaign-planning", prompt);
+      setGlobalPandaOpen(false);
+      setGlobalPandaMessages((items) => [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          text: "I routed this as a Campaign Planning revision and kept you on the Home control tower. Campaign Planning Panda will update the H1 draft objects without approving the gate.",
+          route: "Campaign Planning",
+          highlights: ["Planning revision", "No gate approval", "Shared campaign context updated"],
+          actions: ["Open Campaign Planning", "Review H1 changes"]
+        }
+      ]);
       return;
     }
 
     setHomePrompt("");
+    addMessage(run.campaignId, { role: "user", text: prompt });
     void askGlobalPanda(prompt);
   }
 
@@ -572,6 +618,7 @@ function App() {
   const selectedPhase = phaseViewMap[view] ?? run.phase;
   const contentAgentKey = workspaceAgentMessageKey(run.campaignId, "content");
   const workflowAgentKey = workspaceAgentMessageKey(run.campaignId, view);
+  const sharedCampaignMessages = workspace.messages[run.campaignId] ?? [];
 
   return (
     <main className="appFrame">
@@ -635,6 +682,8 @@ function App() {
               prompt={homePrompt}
               busy={busy}
               campaigns={workspace.campaigns}
+              messages={globalPandaMessages}
+              pandaBusy={globalPandaBusy}
               onPromptChange={setHomePrompt}
               onSubmit={submitHomePrompt}
               onOpenCampaign={(campaignId) => setWorkspace((current) => ({ ...current, activeCampaignId: campaignId }))}
@@ -646,7 +695,7 @@ function App() {
           {view === "content" && (
             <ContentWorkspace
               run={run}
-              messages={workspaceAgentMessages[contentAgentKey] ?? []}
+              messages={visibleWorkspaceMessages(sharedCampaignMessages, workspaceAgentMessages[contentAgentKey] ?? [])}
               busy={busy || Boolean(workspaceAgentBusy[contentAgentKey])}
               agentInput={agentInput}
               contentObjects={contentObjects}
@@ -675,7 +724,7 @@ function App() {
               contentObjects={contentObjects}
               rolloutObjects={rolloutObjects}
               busy={busy || Boolean(workspaceAgentBusy[workflowAgentKey])}
-              messages={workspaceAgentMessages[workflowAgentKey] ?? []}
+              messages={visibleWorkspaceMessages(sharedCampaignMessages, workspaceAgentMessages[workflowAgentKey] ?? [])}
               onRun={(instruction) => runPhase(instruction)}
               onAsk={(targetView, question) => askWorkspacePanda(targetView, question)}
               onApplyContentPlanningInstruction={applyContentPlanningInstructionToWorkspace}
@@ -846,6 +895,8 @@ function HomeLauncher({
   prompt,
   busy,
   campaigns,
+  messages,
+  pandaBusy,
   onPromptChange,
   onSubmit,
   onOpenCampaign,
@@ -855,23 +906,21 @@ function HomeLauncher({
   prompt: string;
   busy: boolean;
   campaigns: CampaignRun[];
+  messages: Array<{ id: string; role: "user" | "agent"; text: string; route?: string; highlights?: string[]; actions?: string[] }>;
+  pandaBusy: boolean;
   onPromptChange: (value: string) => void;
   onSubmit: () => void;
   onOpenCampaign: (campaignId: string) => void;
   onOpenProgress: () => void;
 }) {
-  const chips = skillCapabilityItems().filter((item) => item.category === "knowledge").slice(0, 4);
   return (
     <div className="homePage">
       <section className="homeHero">
         <p className="eyebrow">Panda for Hilti</p>
-        <h1>What campaign shall we build?</h1>
-        <p>Describe your goal in plain language. Panda will plan, build work objects, and route approvals at every gate.</p>
+        <h1>Ask Panda what to do next.</h1>
+        <p>Use Home as the orchestrator: ask a question, create a new campaign, update the current plan, or route work to a specialist workspace.</p>
         <div className="promptCard">
-          <div className="attachedChips">
-            {chips.map((item) => <span key={item.id}>{item.name}</span>)}
-          </div>
-          <textarea value={prompt} onChange={(event) => onPromptChange(event.target.value)} placeholder="Launch the Q4 Power Tool campaign for DACH contractors..." />
+          <textarea value={prompt} onChange={(event) => onPromptChange(event.target.value)} placeholder="Ask a question, update the current campaign, or launch a new campaign..." />
           <div className="promptActions">
             <button className="secondaryAction"><Plus size={18} /> Add skill/file</button>
             <span className="orchestratorMode"><Bot size={15} /> Orchestrator</span>
@@ -879,6 +928,15 @@ function HomeLauncher({
               {busy ? <RefreshCw className="spin" size={20} /> : <Send size={20} />}
             </button>
           </div>
+        </div>
+        <div className="homeAgentTranscript">
+          {messages.slice(-4).map((message) => (
+            <article key={message.id} className={message.role === "agent" ? "agent" : "user"}>
+              <b>{message.role === "agent" ? "Panda" : "You"}</b>
+              <p>{message.text}</p>
+            </article>
+          ))}
+          {pandaBusy && <article className="agent"><b>Panda</b><p>Thinking across the shared campaign context...</p></article>}
         </div>
       </section>
 

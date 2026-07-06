@@ -22,10 +22,13 @@ import {
   buildLeadershipFeedbackProposal,
   buildPlanPreviewSlides,
   buildContentPlanningBridge,
+  campaignConversationKey,
+  classifyHomeIntent,
   contentPlanningBridgeReadiness,
   simulatedPlanDeckFilename,
   currentPhaseMeta,
   defaultUserRole,
+  draftSpecialistAgentResponse,
   homeRouteAfterCampaignLaunch,
   isHomeCampaignCreationIntent,
   navigationItems,
@@ -37,7 +40,9 @@ import {
   phases,
   skillHubSummary,
   skillCapabilityItems,
+  applyPlanningInstruction,
   toolchainItems,
+  visibleWorkspaceMessages,
   workspaceAgentMessageKey
 } from "./panda";
 
@@ -154,6 +159,15 @@ describe("panda run model", () => {
     expect(homeRouteAfterCampaignLaunch("   ")).toBe("home");
   });
 
+  it("classifies home orchestration intent without treating simple chat as campaign creation", () => {
+    expect(classifyHomeIntent("hello").type).toBe("chat");
+    expect(classifyHomeIntent("what is the campaign status?").type).toBe("status");
+    expect(classifyHomeIntent("open content planning").type).toBe("route");
+    expect(classifyHomeIntent("launch a campaign for TE60-22").type).toBe("create-campaign");
+    expect(classifyHomeIntent("update the current campaign to focus on TE60-22").type).toBe("update-campaign");
+    expect(isHomeCampaignCreationIntent("hello campaign")).toBe(false);
+  });
+
   it("restores a persisted app view only when it is valid", () => {
     expect(restoreAppView("content-planning")).toBe("content-planning");
     expect(restoreAppView("rollout")).toBe("rollout");
@@ -164,6 +178,19 @@ describe("panda run model", () => {
   it("keys workspace Panda messages by campaign and workspace", () => {
     expect(workspaceAgentMessageKey("camp_04", "content-planning")).toBe("camp_04:content-planning");
     expect(workspaceAgentMessageKey("camp_te70", "campaign-planning")).toBe("camp_te70:campaign-planning");
+    expect(campaignConversationKey("camp_te70")).toBe("camp_te70:shared");
+  });
+
+  it("combines shared campaign conversation before workspace-specific agent history", () => {
+    const shared = [
+      { id: "brief", role: "user" as const, text: "Launch a campaign for TE60-22", timestamp: "2026-07-06T01:00:00.000Z" },
+      { id: "home", role: "agent" as const, text: "Home Panda created the campaign brief.", timestamp: "2026-07-06T01:00:01.000Z" }
+    ];
+    const local = [
+      { id: "local", role: "agent" as const, text: "Campaign Planning Panda is ready.", timestamp: "2026-07-06T01:00:02.000Z" }
+    ];
+
+    expect(visibleWorkspaceMessages(shared, local).map((message) => message.id)).toEqual(["brief", "home", "local"]);
   });
 
   it("builds a shared Panda campaign context packet for all agent surfaces", () => {
@@ -234,6 +261,42 @@ describe("panda run model", () => {
     expect(answer).toContain("H2");
     expect(answer).toContain("requirements");
     expect(answer).toContain("DeepSeek");
+  });
+
+  it("drafts specialist updates for campaign planning without treating edit requests as approval", () => {
+    const run = createDefaultRun();
+    const plan = campaignPlanForRun(run);
+    const planningObjects = campaignPlanningObjectsFromPlan(plan);
+    const packet = buildPandaContextPacket({
+      run,
+      currentView: "campaign-planning",
+      currentPhase: "planning",
+      userRole: defaultUserRole,
+      campaignPlan: plan,
+      planningObjects,
+      contentRequirements: contentRequirementsFromPlan(plan),
+      contentObjects: [],
+      rolloutObjects: []
+    });
+
+    const response = draftSpecialistAgentResponse("campaign-planning", "there should be no approval here, update the campaign planning for TE60-22", packet);
+
+    expect(response.answer).toContain("Campaign Planning Panda");
+    expect(response.answer).toContain("updated");
+    expect(response.answer).not.toContain("H3");
+    expect(response.updates.some((update) => update.target === "planning_object")).toBe(true);
+  });
+
+  it("applies campaign planning instructions to H1 objects only", () => {
+    const objects = campaignPlanningObjectsFromPlan(campaignPlanForRun(createDefaultRun()));
+    const updated = applyPlanningInstruction(objects, "update the current campaign to focus on TE60-22 and MOCN audience");
+    const objective = updated.find((item) => item.id === "campaign-objective");
+    const audience = updated.find((item) => item.id === "target-audience");
+
+    expect(objective?.status).toBe("revision-requested");
+    expect(objective?.copy).toContain("TE60-22");
+    expect(audience?.copy).toContain("MOCN");
+    expect(updated.every((item) => item.gate === "H1")).toBe(true);
   });
 
   it("adds a MOCN audience content requirement from a content planning instruction", () => {

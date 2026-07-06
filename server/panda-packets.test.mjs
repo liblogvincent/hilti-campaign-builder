@@ -103,4 +103,29 @@ describe("panda server packets", () => {
     expect(answer.suggested_actions).toContain("Resolve blocked content objects");
     expect(answer.route).toBe("Content");
   });
+
+  it("keeps campaign planning specialist answers scoped to H1 plan editing", () => {
+    const answer = buildOrchestratorAnswer({
+      question: "there should be no approval here, I just need to update the campaign planning",
+      phase: "planning",
+      campaign_id: "camp_te60",
+      current_gate: "H1",
+      agent_scope: { role: "campaign-planning-specialist", surface: "campaign-planning" },
+      planning_objects: [
+        { id: "campaign-objective", title: "Campaign Objective", status: "in-review", gate: "H1" },
+        { id: "target-audience", title: "Target Audience", status: "revision-requested", gate: "H1" }
+      ],
+      content_objects: [
+        { id: "claim-01", title: "Power Tools proof point", status: "blocked", channel: "Claims", owner: "Legal / Compliance" }
+      ],
+      rollout_objects: [
+        { id: "sprinklr", title: "Sprinklr organic and HN draft posts", status: "blocked", lane: "Sprinklr", owner: "Social" }
+      ]
+    });
+
+    expect(answer.route).toBe("Campaign Planning");
+    expect(answer.answer).toContain("H1 plan");
+    expect(answer.answer).not.toContain("rollout readiness");
+    expect(answer.answer).not.toContain("H3");
+  });
 });

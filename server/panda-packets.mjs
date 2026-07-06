@@ -75,14 +75,33 @@ export function buildCampaignPlan(payload) {
 
 export function buildOrchestratorAnswer(payload) {
   const question = String(payload.question || "What should I do next?").trim();
+  const scopeSurface = payload.agent_scope?.surface || payload.current_view;
   const contentObjects = Array.isArray(payload.content_objects) ? payload.content_objects : [];
+  const planningObjects = Array.isArray(payload.planning_objects) ? payload.planning_objects : [];
   const rolloutObjects = Array.isArray(payload.rollout_objects) ? payload.rollout_objects : [];
   const blockedContent = contentObjects.filter((item) => item?.status === "blocked");
   const revisionContent = contentObjects.filter((item) => item?.status === "revision-requested");
   const approvedContent = contentObjects.filter((item) => item?.status === "approved");
   const blockedRollout = rolloutObjects.filter((item) => item?.status === "blocked");
   const gate = payload.current_gate || gateForPhase(payload.phase);
-  const route = routeForQuestion(question, payload.phase);
+  const route = routeForQuestion(question, payload.phase, scopeSurface);
+  if (scopeSurface === "campaign-planning" && !asksForRollout(question)) {
+    const blockedPlanning = planningObjects.filter((item) => item?.status === "blocked");
+    const revisionPlanning = planningObjects.filter((item) => item?.status === "revision-requested");
+    const answer = revisionPlanning.length || blockedPlanning.length
+      ? `H1 plan editing is active. ${revisionPlanning.length} planning object${revisionPlanning.length === 1 ? "" : "s"} need revision and ${blockedPlanning.length} planning object${blockedPlanning.length === 1 ? " is" : "s are"} blocked. Panda can update objective, audience, KPIs, budget, channels, assumptions, and missing inputs without approving the gate.`
+      : "H1 plan editing is active. Panda can update the campaign planning draft without approving the gate.";
+    return {
+      answer,
+      highlights: [
+        `${planningObjects.length} H1 planning object${planningObjects.length === 1 ? "" : "s"}`,
+        `${revisionPlanning.length} revision request${revisionPlanning.length === 1 ? "" : "s"}`,
+        `${blockedPlanning.length} blocked H1 input${blockedPlanning.length === 1 ? "" : "s"}`,
+      ],
+      suggested_actions: ["Revise H1 plan object", "Review missing H1 inputs", "Prepare H1 packet when ready"],
+      route: "Campaign Planning",
+    };
+  }
   const highlights = [
     `${approvedContent.length}/${contentObjects.length} content objects approved`,
     `${blockedContent.length} blocked content object${blockedContent.length === 1 ? "" : "s"}`,
@@ -515,13 +534,23 @@ function gateForPhase(phase) {
   return "H1";
 }
 
-function routeForQuestion(question, phase) {
+function routeForQuestion(question, phase, scopeSurface) {
+  if (scopeSurface === "campaign-planning") return "Campaign Planning";
+  if (scopeSurface === "content-planning") return "Content Planning";
+  if (scopeSurface === "content") return "Content";
+  if (scopeSurface === "rollout") return "Rollout";
+  if (scopeSurface === "optimize") return "Optimize";
   const text = question.toLowerCase();
   if (text.includes("content") || text.includes("h2") || phase === "content") return "Content";
   if (text.includes("rollout") || text.includes("publish") || text.includes("h3") || phase === "rollout") return "Rollout";
   if (text.includes("optimize") || text.includes("performance") || text.includes("h4") || phase === "optimize") return "Optimize";
   if (text.includes("plan") || text.includes("h1")) return "Campaign Planning";
   return "Progress";
+}
+
+function asksForRollout(question) {
+  const text = question.toLowerCase();
+  return /\b(rollout|publish|h3|sprinklr|sfmc|contentful|utm)\b/.test(text);
 }
 
 function suggestedActionsForContext(gate, blockedContentCount, revisionContentCount, blockedRolloutCount) {

@@ -2406,6 +2406,42 @@ footer {
   align-items: center;
 }
 
+.homeAgentTranscript {
+  width: min(920px, 100%);
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  text-align: left;
+}
+
+.homeAgentTranscript article {
+  max-width: 760px;
+  padding: 12px 14px;
+  border: 1px solid #ead8d8;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.homeAgentTranscript article.agent {
+  border-left: 4px solid var(--hilti-red);
+}
+
+.homeAgentTranscript article.user {
+  justify-self: end;
+  background: #171717;
+  color: #fff;
+}
+
+.homeAgentTranscript b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.homeAgentTranscript p {
+  margin: 0;
+  line-height: 1.45;
+}
+
 .modePicker {
   justify-self: end;
   display: inline-grid;
