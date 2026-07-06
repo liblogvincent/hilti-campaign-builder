@@ -47,6 +47,7 @@ import {
   applyPlanningInstruction,
   toolchainItems,
   visibleWorkspaceMessages,
+  normalizeCampaignSnapshot,
   workspaceAgentMessageKey
 } from "./panda";
 
@@ -725,6 +726,32 @@ describe("panda run model", () => {
     expect(plan.markets).toEqual(["JP"]);
     expect(plan.channels).toHaveLength(1);
     expect(plan.assumptions).toContain("Snapshot supplied plan");
+  });
+
+  it("normalizes durable campaign snapshots with visible plan markets", () => {
+    const snapshot = normalizeCampaignSnapshot({
+      campaign: { id: "camp_04", name: "Campaign", brief: "", phase: "planning", activeGate: "H1", ownerRole: "Campaign Owner" },
+      plan: {
+        campaignId: "camp_04",
+        name: "Campaign",
+        heroProduct: "TE2-22",
+        markets: ["China", "Japan", "Australia"],
+        locales: ["zh-CN", "ja-JP", "en-AU"],
+        audience: ["Contractors"],
+        budget: "EUR 50k",
+        timeline: "Q4",
+        channels: [],
+        kpis: ["Net sales"],
+        assumptions: [],
+      },
+      workObjects: [],
+      contentRequirements: [],
+      gateDecisions: [],
+      events: [],
+      agentThreads: [],
+    });
+
+    expect(snapshot.plan.markets).toEqual(["China", "Japan", "Australia"]);
   });
 
   it("turns the campaign plan into H1 planning work objects", () => {

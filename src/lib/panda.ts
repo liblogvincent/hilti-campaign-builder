@@ -131,6 +131,235 @@ export type CampaignRun = {
   snapshot?: PandaCampaignSnapshot;
 };
 
+export type CampaignRuntimeEvent = {
+  id: string;
+  type: string;
+  workspace: string;
+  actor: string;
+  payload: Record<string, unknown>;
+  createdAt?: string;
+};
+
+export type CampaignRuntimeSnapshot = {
+  campaign: {
+    id: string;
+    name: string;
+    brief: string;
+    phase: PhaseId | string;
+    activeGate: string;
+    ownerRole: UserRole | string;
+  };
+  plan: CampaignPlan;
+  workObjects: PlanningWorkObject[];
+  contentRequirements: ContentRequirement[];
+  gateDecisions: GateDecision[];
+  events: CampaignRuntimeEvent[];
+  agentThreads: unknown[];
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function normalizeCampaignSnapshot(raw: unknown): CampaignRuntimeSnapshot {
+  const record = isRecord(raw) ? raw : {};
+  const campaignRecord = isRecord(record.campaign) ? record.campaign : record;
+  const campaign = normalizeCampaignRecord(campaignRecord);
+  const plan = normalizeCampaignPlan(record.plan ?? record.campaign_plan, campaign);
+
+  const workObjectsRaw = pickRawArray(record, "workObjects", "work_objects");
+  const contentRequirementsRaw = pickRawArray(record, "contentRequirements", "content_requirements");
+
+  return {
+    campaign,
+    plan,
+    workObjects: workObjectsRaw ? normalizePlanningWorkObjects(workObjectsRaw, plan) : campaignPlanningObjectsFromPlan(plan),
+    contentRequirements: contentRequirementsRaw ? normalizeContentRequirements(contentRequirementsRaw, plan) : contentRequirementsFromPlan(plan),
+    gateDecisions: normalizeGateDecisions(pickRawArray(record, "gateDecisions", "gate_decisions")),
+    events: normalizeRuntimeEvents(pickRawArray(record, "events")),
+    agentThreads: pickRawArray(record, "agentThreads", "agent_threads") ?? []
+  };
+}
+
+function normalizeCampaignRecord(record: Record<string, unknown>) {
+  return {
+    id: stringValue(record.id) || stringValue(record.campaignId) || stringValue(record.campaign_id) || "campaign-unknown",
+    name: stringValue(record.name) || stringValue(record.campaignName) || stringValue(record.campaign_name) || "Untitled campaign",
+    brief: stringValue(record.brief),
+    phase: stringValue(record.phase) || "planning",
+    activeGate: stringValue(record.activeGate) || stringValue(record.active_gate) || "H1",
+    ownerRole: normalizeUserRole(record.ownerRole ?? record.owner_role)
+  };
+}
+
+function normalizeCampaignPlan(rawPlan: unknown, campaign: CampaignRuntimeSnapshot["campaign"]): CampaignPlan {
+  const record = isRecord(rawPlan) ? rawPlan : {};
+  const channels = Array.isArray(record.channels) ? normalizeChannels(record.channels) : defaultPlanChannels();
+  const brief = campaign.brief || campaign.name;
+  return {
+    campaignId: stringValue(record.campaignId) || stringValue(record.campaign_id) || campaign.id,
+    name: stringValue(record.name) || campaign.name,
+    heroProduct: stringValue(record.heroProduct) || stringValue(record.hero_product) || inferHeroProduct(brief),
+    markets: stringArray(record.markets, ["DE", "AT", "CH"]),
+    locales: stringArray(record.locales, ["de-DE", "de-AT", "de-CH", "fr-CH"]),
+    audience: stringArray(record.audience, ["Contractors", "Specifiers"]),
+    budget: stringValue(record.budget) || inferBudget(brief),
+    timeline: stringValue(record.timeline) || "Q4 launch window; no auto-publish before H3 approval.",
+    channels,
+    kpis: stringArray(record.kpis, ["Qualified HOL visits", "H3 publish readiness without auto-publish"]),
+    assumptions: stringArray(record.assumptions, ["Agent-generated plan normalized by Panda."])
+  };
+}
+
+function normalizePlanningWorkObjects(raw: unknown, plan: CampaignPlan): PlanningWorkObject[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item, index) => {
+    if (!isRecord(item)) return [];
+    const lane = normalizePlanningLane(item.lane);
+    const title = stringValue(item.title) || `Planning object ${index + 1}`;
+    return [
+      {
+        id: stringValue(item.id) || `planning-object-${index + 1}`,
+        title,
+        lane,
+        owner: normalizePlanningOwner(item.owner, lane),
+        status: normalizeWorkObjectStatus(item.status),
+        gate: "H1",
+        copy: stringValue(item.copy) || `Draft ${title.toLowerCase()} for ${plan.name}.`,
+        evidence: stringArray(item.evidence, ["Normalized from Panda runtime snapshot"]),
+        source: "CampaignPlan"
+      }
+    ];
+  });
+}
+
+function normalizeContentRequirements(raw: unknown, plan: CampaignPlan): ContentRequirement[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item, index) => {
+    if (!isRecord(item)) return [];
+    const channel = normalizeRequirementChannel(item.channel);
+    const assetType = stringValue(item.assetType) || stringValue(item.asset_type) || "Content asset";
+    const locale = stringValue(item.locale) || "master";
+    const title = stringValue(item.title) || titleForAsset(plan.heroProduct, channel, assetType);
+    return [
+      {
+        id: stringValue(item.id) || `content-requirement-${index + 1}`,
+        channel,
+        assetType,
+        title,
+        locale,
+        owner: normalizeOwner(item.owner, channel),
+        source: stringValue(item.source) || "Content Planning matrix",
+        evidence: stringArray(item.evidence, ["Normalized from Panda runtime snapshot"]),
+        compliance:
+          stringValue(item.compliance) ||
+          (channel === "Claims"
+            ? "Requires source-backed claim review before H2."
+            : "Requires brand, tone, and locale fit check before H2."),
+        rolloutTarget: normalizeRolloutTarget(item.rolloutTarget, channel)
+      }
+    ];
+  });
+}
+
+function normalizeGateDecisions(raw: unknown): GateDecision[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item, index) => {
+    if (!isRecord(item)) return [];
+    const gateId = normalizeGateId(item.gateId ?? item.gate_id ?? item.id);
+    return [
+      {
+        gateId,
+        decision: item.decision === "approved" ? "approved" : "revision_requested",
+        reviewer: stringValue(item.reviewer) || defaultUserRole,
+        comment: stringValue(item.comment) || "Runtime gate decision normalized by Panda.",
+        artifactsReviewed: stringArray(item.artifactsReviewed ?? item.artifacts_reviewed, []),
+        timestamp: stringValue(item.timestamp) || "1970-01-01T00:00:00.000Z"
+      }
+    ];
+  });
+}
+
+function normalizeRuntimeEvents(raw: unknown): CampaignRuntimeEvent[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item, index) => {
+    if (!isRecord(item)) return [];
+    const payload = isRecord(item.payload) ? item.payload : {};
+    const event: CampaignRuntimeEvent = {
+      id: stringValue(item.id) || `event-${index + 1}`,
+      type: stringValue(item.type) || "runtime-event",
+      workspace: stringValue(item.workspace) || "campaign-planning",
+      actor: stringValue(item.actor) || "Panda runtime",
+      payload
+    };
+    const createdAt = stringValue(item.createdAt);
+    return [createdAt ? { ...event, createdAt } : event];
+  });
+}
+
+function normalizeCampaignSnapshotArray<T>(value: unknown): T[] | undefined {
+  return Array.isArray(value) ? (value as T[]) : undefined;
+}
+
+function pickRawArray(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = normalizeCampaignSnapshotArray(record[key]);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function normalizeUserRole(value: unknown): UserRole {
+  const text = stringValue(value) as UserRole;
+  if (["Campaign Owner", "Paid Media", "Content / Creative", "HOL", "Email TA", "Legal / Compliance", "Leadership / Approver"].includes(text)) {
+    return text;
+  }
+  return defaultUserRole;
+}
+
+function normalizePlanningLane(value: unknown): PlanningWorkObject["lane"] {
+  const text = stringValue(value).toLowerCase();
+  if (text.includes("strategy")) return "Strategy";
+  if (text.includes("audience")) return "Audience";
+  if (text.includes("analytic")) return "Analytics";
+  if (text.includes("media")) return "Media";
+  if (text.includes("finance") || text.includes("budget")) return "Finance";
+  if (text.includes("pmo") || text.includes("timeline")) return "PMO";
+  if (text.includes("risk") || text.includes("legal") || text.includes("compliance")) return "Risk";
+  return "Strategy";
+}
+
+function normalizePlanningOwner(value: unknown, lane: PlanningWorkObject["lane"]): UserRole {
+  const text = stringValue(value) as UserRole;
+  if (["Campaign Owner", "Paid Media", "Content / Creative", "HOL", "Email TA", "Legal / Compliance", "Leadership / Approver"].includes(text)) {
+    return text;
+  }
+  if (lane === "Media") return "Paid Media";
+  if (lane === "Analytics") return "Leadership / Approver";
+  if (lane === "Risk") return "Legal / Compliance";
+  return defaultUserRole;
+}
+
+function normalizeWorkObjectStatus(value: unknown): WorkObjectStatus {
+  const text = stringValue(value);
+  if (["draft", "in-review", "approved", "revision-requested", "blocked"].includes(text)) return text as WorkObjectStatus;
+  return "draft";
+}
+
+function normalizeRequirementChannel(value: unknown): ContentRequirement["channel"] {
+  const name = normalizeChannelName(value);
+  if (name) return name as ContentRequirement["channel"];
+  const text = stringValue(value).toLowerCase();
+  if (text.includes("claim")) return "Claims";
+  return "Paid Media";
+}
+
+function normalizeGateId(value: unknown): GateId {
+  const text = stringValue(value);
+  if (["H1", "H2", "H3", "H4", "H-C", "H-legal"].includes(text)) return text as GateId;
+  return "H1";
+}
+
 export type AgentMessage = {
   id: string;
   role: "user" | "agent" | "system";

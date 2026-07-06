@@ -3322,6 +3322,18 @@ footer {
   min-height: 230px;
 }
 
+.updatedByPanda {
+  display: inline-flex;
+  width: fit-content;
+  margin: 10px 0 0;
+  padding: 4px 8px;
+  border: 1px solid rgba(210, 5, 30, 0.28);
+  background: rgba(210, 5, 30, 0.06);
+  color: #d2051e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .planSectionCard h3 {
   margin: 0;
   font-family: PandaDisplay, sans-serif;

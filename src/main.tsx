@@ -40,6 +40,7 @@ import {
   campaignPlanningReadiness,
   campaignPlanForRun,
   CampaignPlan,
+  CampaignRuntimeSnapshot,
   CampaignRun,
   CampaignWorkspace,
   buildHomeCampaignDiscoveryReply,
@@ -64,6 +65,7 @@ import {
   navigationItems,
   nextPhase,
   normalizeServerUpdates,
+  normalizeCampaignSnapshot,
   PandaAgentResponse,
   PandaArtifact,
   PandaOrchestratorResponse,
@@ -100,8 +102,10 @@ const phaseViewMap: Partial<Record<AppView, PhaseId>> = {
   optimize: "optimize"
 };
 
+const initialWorkspace = loadWorkspace();
+
 function App() {
-  const [workspace, setWorkspace] = useState<CampaignWorkspace>(() => loadWorkspace());
+  const [workspace, setWorkspace] = useState<CampaignWorkspace>(() => initialWorkspace);
   const [view, setView] = useState<AppView>(() => restoreAppView(localStorage.getItem(viewStorageKey)));
   const [busy, setBusy] = useState(false);
   const [reviewer, setReviewer] = useState("Vincent");
@@ -123,21 +127,26 @@ function App() {
   const [contentRequirementRecords, setContentRequirementRecords] = useState<Record<string, ContentRequirement[]>>({});
   const [contentObjectRecords, setContentObjectRecords] = useState<Record<string, ContentWorkObject[]>>({});
   const [rolloutObjectRecords, setRolloutObjectRecords] = useState<Record<string, RolloutWorkObject[]>>({});
+  const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, CampaignRuntimeSnapshot>>(() => runtimeSnapshotsFromWorkspace(initialWorkspace));
 
   const run = workspace.campaigns.find((campaign) => campaign.campaignId === workspace.activeCampaignId) ?? workspace.campaigns[0];
+  const runtimeSnapshot = runtimeSnapshots[run.campaignId];
   const activePhase = currentPhaseMeta(run.phase);
   const phaseGate = run.currentGate?.id === activePhase.gate ? run.currentGate : undefined;
-  const gateApproved = run.gateDecisions.some((decision) => decision.gateId === activePhase.gate && decision.decision === "approved");
-  const campaignPlan = useMemo(() => campaignPlanForRun(run), [run]);
+  const activeGateDecisions = runtimeSnapshot?.gateDecisions ?? run.gateDecisions;
+  const gateApproved = activeGateDecisions.some((decision) => decision.gateId === activePhase.gate && decision.decision === "approved");
+  const generatedCampaignPlan = useMemo(() => campaignPlanForRun(run), [run]);
+  const campaignPlan = runtimeSnapshot?.plan ?? generatedCampaignPlan;
   const generatedPlanningObjects = useMemo(() => campaignPlanningObjectsFromPlan(campaignPlan), [campaignPlan]);
-  const planningObjects = planningObjectRecords[run.campaignId] ?? generatedPlanningObjects;
+  const planningObjects = planningObjectRecords[run.campaignId] ?? runtimeSnapshot?.workObjects ?? generatedPlanningObjects;
   const planningReadiness = useMemo(() => campaignPlanningReadiness(planningObjects), [planningObjects]);
   const generatedContentRequirements = useMemo(() => contentRequirementsFromPlan(campaignPlan), [campaignPlan]);
-  const contentRequirements = contentRequirementRecords[run.campaignId] ?? generatedContentRequirements;
+  const contentRequirements = contentRequirementRecords[run.campaignId] ?? runtimeSnapshot?.contentRequirements ?? generatedContentRequirements;
   const generatedContentObjects = useMemo(() => createContentWorkObjectsFromRequirements(contentRequirements), [contentRequirements]);
   const contentObjects = contentObjectRecords[run.campaignId] ?? generatedContentObjects;
   const generatedRolloutObjects = useMemo(() => createRolloutWorkObjectsFromContent(contentObjects), [contentObjects]);
   const rolloutObjects = rolloutObjectRecords[run.campaignId] ?? generatedRolloutObjects;
+  const activeRun = runtimeSnapshot ? { ...run, gateDecisions: activeGateDecisions } : run;
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(workspace));
@@ -152,9 +161,9 @@ function App() {
   }, [view, workspace.activeCampaignId]);
 
   const completion = useMemo(() => {
-    const approved = new Set(run.gateDecisions.filter((decision) => decision.decision === "approved").map((decision) => decision.gateId));
+    const approved = new Set(activeGateDecisions.filter((decision) => decision.decision === "approved").map((decision) => decision.gateId));
     return Math.round((approved.size / 4) * 100);
-  }, [run.gateDecisions]);
+  }, [activeGateDecisions]);
 
   function updateRun(updater: (run: CampaignRun) => CampaignRun) {
     setWorkspace((current) => ({
@@ -182,7 +191,7 @@ function App() {
 
   function pandaContextFor(targetView: AppView) {
     return buildPandaContextPacket({
-      run,
+      run: activeRun,
       currentView: targetView,
       currentPhase: phaseForView(targetView),
       userRole: defaultUserRole,
@@ -247,7 +256,7 @@ function App() {
       applyCampaignPlanningInstructionToWorkspace(text);
       const updatedPlanningObjects = applyPlanningInstruction(planningObjects, text);
       context = buildPandaContextPacket({
-        run,
+        run: activeRun,
         currentView: targetView,
         currentPhase: phaseForView(targetView),
         userRole: defaultUserRole,
@@ -264,7 +273,7 @@ function App() {
       const updatedRequirements = applyContentPlanningInstruction(contentRequirements, campaignPlan, text);
       const updatedObjects = createContentWorkObjectsFromRequirements(updatedRequirements);
       context = buildPandaContextPacket({
-        run,
+        run: activeRun,
         currentView: targetView,
         currentPhase: phaseForView(targetView),
         userRole: defaultUserRole,
@@ -293,12 +302,14 @@ function App() {
       const packet = (await response.json()) as PandaOrchestratorResponse;
       const serverUpdates = normalizeServerUpdates(packet.updates);
       let serverApplied = false;
-      const hasRuntimeSnapshot = Boolean(packet.snapshot?.plan);
+      const hasRuntimeSnapshot = Boolean(packet.snapshot);
       const suppressLocalReplay = hasRuntimeSnapshot || packet.no_replay || packet.snapshot_status === "unavailable_after_commit";
       if (hasRuntimeSnapshot) {
+        const snapshot = normalizeCampaignSnapshot(packet.snapshot);
+        setRuntimeSnapshots((current) => ({ ...current, [snapshot.campaign.id]: snapshot }));
         updateRun((current) => ({
           ...current,
-          snapshot: packet.snapshot,
+          snapshot: packet.snapshot
         }));
         setPlanningObjectRecords((current) => {
           if (!Object.prototype.hasOwnProperty.call(current, run.campaignId)) return current;
@@ -448,7 +459,7 @@ function App() {
           phase: run.phase,
           brief: run.brief,
           campaign_id: run.campaignId,
-          approved_gates: run.gateDecisions.filter((decision) => decision.decision === "approved").map((decision) => decision.gateId),
+          approved_gates: activeGateDecisions.filter((decision) => decision.decision === "approved").map((decision) => decision.gateId),
           existing_artifacts: run.artifacts.map((artifact) => ({ name: artifact.name, type: artifact.type, phase: artifact.phase })),
           instruction: userInstruction || "Create the next gate-ready artifact packet. Keep evidence visible, and never auto-publish."
         })
@@ -642,6 +653,27 @@ function App() {
       ],
       updatedAt: timestamp
     }));
+    setRuntimeSnapshots((current) => {
+      const snapshot = current[run.campaignId];
+      if (!snapshot) return current;
+      return {
+        ...current,
+        [run.campaignId]: {
+          ...snapshot,
+          gateDecisions: [
+            ...snapshot.gateDecisions.filter((decision) => !(decision.gateId === gateId && decision.decision === "approved")),
+            {
+              gateId,
+              decision: "approved",
+              reviewer,
+              comment: gateId === "H3" ? "Publish authorization granted for held candidates. External connector still requires live credentials." : "Approved in Panda prototype.",
+              artifactsReviewed: reviewed,
+              timestamp
+            }
+          ]
+        }
+      };
+    });
     addMessage(run.campaignId, { role: "system", text: `${gateId} approved by ${reviewer}. I moved the campaign to ${currentPhaseMeta(nextPhase(run.phase)).label}.` });
   }
 
@@ -657,6 +689,27 @@ function App() {
       nextActions: ["Tell Panda what to revise", "Run phase again", "Re-open gate packet"],
       updatedAt: timestamp
     }));
+    setRuntimeSnapshots((current) => {
+      const snapshot = current[run.campaignId];
+      if (!snapshot) return current;
+      return {
+        ...current,
+        [run.campaignId]: {
+          ...snapshot,
+          gateDecisions: [
+            ...snapshot.gateDecisions,
+            {
+              gateId,
+              decision: "revision_requested",
+              reviewer,
+              comment: "Revision requested from Panda before approval.",
+              artifactsReviewed: run.artifacts.filter((artifact) => artifact.phase === run.phase).map((artifact) => artifact.id),
+              timestamp
+            }
+          ]
+        }
+      };
+    });
     addMessage(run.campaignId, { role: "system", text: `${gateId} revision requested. Tell me what to change and I will rerun the phase.` });
   }
 
@@ -676,6 +729,7 @@ function App() {
     setContentRequirementRecords({});
     setContentObjectRecords({});
     setRolloutObjectRecords({});
+    setRuntimeSnapshots({});
     setView("home");
   }
 
@@ -1507,15 +1561,16 @@ function WorkflowShell({
           {handoff.metrics.map((metric) => <span key={metric}>{metric}</span>)}
         </div>
         {view === "campaign-planning" && (
-          <CampaignPlanningWorkspace
-            plan={campaignPlan}
-            objects={planningObjects}
-            readiness={planningReadiness}
-            requirements={contentRequirements}
-            onApplyFeedback={onApplyCampaignPlanningFeedback}
-            onUpdate={onUpdatePlanningObject}
-          />
-        )}
+        <CampaignPlanningWorkspace
+          plan={campaignPlan}
+          objects={planningObjects}
+          readiness={planningReadiness}
+          requirements={contentRequirements}
+          runtimeSnapshot={runtimeSnapshot}
+          onApplyFeedback={onApplyCampaignPlanningFeedback}
+          onUpdate={onUpdatePlanningObject}
+        />
+      )}
         {view === "content-planning" && (
           <ContentPlanningBoard
             plan={campaignPlan}
@@ -1565,6 +1620,7 @@ function CampaignPlanningWorkspace({
   objects,
   readiness,
   requirements,
+  runtimeSnapshot,
   onApplyFeedback,
   onUpdate
 }: {
@@ -1572,6 +1628,7 @@ function CampaignPlanningWorkspace({
   objects: PlanningWorkObject[];
   readiness: PlanningReadiness;
   requirements: ContentRequirement[];
+  runtimeSnapshot?: CampaignRuntimeSnapshot;
   onApplyFeedback: (proposal: LeadershipFeedbackProposal) => void;
   onUpdate: (id: string, status: WorkObjectStatus, comment: string) => void;
 }) {
@@ -1637,6 +1694,7 @@ function CampaignPlanningWorkspace({
             </div>
             <span className="objectStatus in-review">H1 packet</span>
           </div>
+          {runtimeSnapshot && <span className="updatedByPanda">Updated by Panda runtime</span>}
 
           <div className="planSummary">
             <article><small>Markets</small><strong>{plan.markets.join(", ")}</strong></article>
@@ -2606,6 +2664,14 @@ function loadWorkspace(): CampaignWorkspace {
   } catch {
     return createDefaultWorkspace();
   }
+}
+
+function runtimeSnapshotsFromWorkspace(workspace: CampaignWorkspace) {
+  return workspace.campaigns.reduce<Record<string, CampaignRuntimeSnapshot>>((accumulator, campaign) => {
+    if (!campaign.snapshot) return accumulator;
+    accumulator[campaign.campaignId] = normalizeCampaignSnapshot(campaign.snapshot);
+    return accumulator;
+  }, {});
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
