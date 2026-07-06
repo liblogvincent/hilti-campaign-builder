@@ -737,6 +737,7 @@ function App() {
     setContentObjectRecords({});
     setRolloutObjectRecords({});
     setRuntimeSnapshots({});
+    setRuntimeSnapshotEvidence({});
     setView("home");
   }
 

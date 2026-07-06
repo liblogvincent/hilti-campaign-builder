@@ -31,6 +31,13 @@ Done.
 ## Task 8 Fix Report
 - Files changed: `src/lib/panda.ts`, `src/lib/panda.test.ts`, `src/main.tsx`
 - Tests run: `npm test -- src/lib/panda.test.ts`, `npm run build`, `npm test`
-- Commit hash: `f127ccb`
+- Commit hash: `31d5949`
 - Self-review: hardened array normalization so empty or malformed snapshot arrays fall back to safe defaults or plan-derived data; keyed runtime snapshot hydration by the active campaign id / raw payload campaign id instead of a normalized fallback id; and gated the Panda runtime badge behind explicit runtime evidence.
 - Concerns: runtime evidence is still inferred from raw snapshot payload shape, so if future payloads change their evidence fields we may need to extend the helper rather than relying on the current array set.
+
+## Task 8 Evidence Reset Fix Report
+- Files changed: `src/main.tsx`, `.superpowers/sdd/task-8-report.md`
+- Tests run: `npm test -- src/lib/panda.test.ts`, `npm test`, `npm run build`
+- Commit hash: pending
+- Self-review: `resetWorkspace()` now clears the runtime evidence map along with runtime snapshots, preventing stale runtime provenance badges after reset.
+- Concerns: no component-level reset regression test exists; verification is through full build/test suite.
