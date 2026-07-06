@@ -359,7 +359,8 @@ export type LeadershipFeedbackProposal = {
 };
 
 export type PandaAgentScope = {
-  role: "orchestrator" | "campaign-planning-specialist" | "content-planning-specialist" | "content-specialist" | "rollout-specialist" | "optimization-specialist";
+  id: "home-orchestrator" | "campaign-planning-specialist" | "content-planning-specialist" | "content-specialist" | "rollout-specialist" | "optimize-specialist";
+  role: "orchestrator" | "campaign-planning-specialist" | "content-planning-specialist" | "content-specialist" | "rollout-specialist" | "optimize-specialist";
   surface: AppView;
   allowed_actions: string[];
   selected_object_id?: string;
@@ -959,6 +960,7 @@ function routeIntent(text: string): AppView | undefined {
 export function buildAgentScope(view: AppView, selectedObjectId?: string): PandaAgentScope {
   if (view === "content") {
     return {
+      id: "content-specialist",
       role: "content-specialist",
       surface: view,
       selected_object_id: selectedObjectId,
@@ -967,6 +969,7 @@ export function buildAgentScope(view: AppView, selectedObjectId?: string): Panda
   }
   if (view === "content-planning") {
     return {
+      id: "content-planning-specialist",
       role: "content-planning-specialist",
       surface: view,
       selected_object_id: selectedObjectId,
@@ -975,6 +978,7 @@ export function buildAgentScope(view: AppView, selectedObjectId?: string): Panda
   }
   if (view === "campaign-planning") {
     return {
+      id: "campaign-planning-specialist",
       role: "campaign-planning-specialist",
       surface: view,
       selected_object_id: selectedObjectId,
@@ -983,6 +987,7 @@ export function buildAgentScope(view: AppView, selectedObjectId?: string): Panda
   }
   if (view === "rollout") {
     return {
+      id: "rollout-specialist",
       role: "rollout-specialist",
       surface: view,
       selected_object_id: selectedObjectId,
@@ -991,17 +996,19 @@ export function buildAgentScope(view: AppView, selectedObjectId?: string): Panda
   }
   if (view === "optimize") {
     return {
-      role: "optimization-specialist",
+      id: "optimize-specialist",
+      role: "optimize-specialist",
       surface: view,
       selected_object_id: selectedObjectId,
       allowed_actions: ["analyze_performance", "recommend_optimization", "prepare_h4", "promote_learning_candidate"]
     };
   }
   return {
+    id: "home-orchestrator",
     role: "orchestrator",
     surface: view,
     selected_object_id: selectedObjectId,
-    allowed_actions: ["create_campaign", "route_workspace", "explain_status", "find_blockers"]
+    allowed_actions: ["ask_brief_question", "create_campaign_when_ready", "route_to_workspace", "explain_status"]
   };
 }
 

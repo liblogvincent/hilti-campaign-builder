@@ -249,10 +249,11 @@ describe("panda run model", () => {
   });
 
   it("scopes specialist Panda agents without hiding shared context", () => {
-    expect(buildAgentScope("home")).toEqual({
+    expect(buildAgentScope("home")).toMatchObject({
+      id: "home-orchestrator",
       role: "orchestrator",
       surface: "home",
-      allowed_actions: ["create_campaign", "route_workspace", "explain_status", "find_blockers"]
+      allowed_actions: ["ask_brief_question", "create_campaign_when_ready", "route_to_workspace", "explain_status"]
     });
     expect(buildAgentScope("content")).toMatchObject({
       role: "content-specialist",

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { callJsonAgent } from "./ai-transport.mjs";
+import { getAgentDefinition } from "./agent-registry.mjs";
 import { buildFallback, buildIntegrationPackage, buildOrchestratorAnswer } from "./panda-packets.mjs";
 
 const systemPrompt = `You are Panda, a DeepSeek-backed campaign orchestration agent for Hilti Agentic E2E.
@@ -75,12 +76,13 @@ export async function handleOrchestrator(req, res) {
   if (req.method !== "POST") return sendJson(res, 405, { error: "Method not allowed" });
 
   const payload = await readJson(req);
+  const agent = getAgentDefinition(payload.agent_scope);
   const fallback = buildOrchestratorAnswer(payload);
 
   try {
     const result = await callJsonAgent({
       payload,
-      systemPrompt: orchestratorPrompt,
+      systemPrompt: agent.systemPrompt,
       fallback,
       normalize: (data, _payload, mode) => normalizeOrchestratorResponse(data, payload, mode),
     });

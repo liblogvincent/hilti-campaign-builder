@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { handleAgent, handleHealth, handleIntegrationPackage, handleOrchestrator } from "./panda-api.mjs";
 import { callJsonAgent, resolveProviderConfig, parseJsonObject } from "./ai-transport.mjs";
+import { getAgentDefinition } from "./agent-registry.mjs";
 
 describe("ai transport", () => {
   it("uses fixture mode when no provider key is available", () => {
@@ -74,6 +75,70 @@ describe("ai transport", () => {
     expect(result.warning).toBe(
       "DeepSeek returned malformed JSON; Panda normalized it into a safe gate packet.",
     );
+  });
+});
+
+describe("agent registry", () => {
+  it("routes home to the orchestrator definition", () => {
+    const agent = getAgentDefinition({ id: "home-orchestrator", view: "home" });
+    expect(agent.id).toBe("home-orchestrator");
+    expect(agent.allowedActions).toContain("ask_brief_question");
+  });
+
+  it("routes content planning to its specialist definition", () => {
+    const agent = getAgentDefinition({ id: "content-planning-specialist", view: "content-planning" });
+    expect(agent.id).toBe("content-planning-specialist");
+    expect(agent.allowedActions).toContain("update_content_requirements");
+  });
+
+  it("resolves by role field from client agent scope", () => {
+    const agent = getAgentDefinition({ role: "rollout-specialist", surface: "rollout" });
+    expect(agent.id).toBe("rollout-specialist");
+  });
+
+  it("resolves by view when id and role are missing", () => {
+    const agent = getAgentDefinition({ view: "optimize" });
+    expect(agent.id).toBe("optimize-specialist");
+  });
+
+  it("falls back to home orchestrator for unknown scope", () => {
+    const agent = getAgentDefinition({ id: "nonexistent", view: "unknown" });
+    expect(agent.id).toBe("home-orchestrator");
+  });
+
+  it("returns home orchestrator when scope is null or undefined", () => {
+    expect(getAgentDefinition(null).id).toBe("home-orchestrator");
+    expect(getAgentDefinition(undefined).id).toBe("home-orchestrator");
+  });
+
+  it("builds a system prompt for every registered agent", () => {
+    for (const id of [
+      "home-orchestrator",
+      "campaign-planning-specialist",
+      "content-planning-specialist",
+      "content-specialist",
+      "rollout-specialist",
+      "optimize-specialist",
+    ]) {
+      const agent = getAgentDefinition({ id });
+      expect(agent.systemPrompt).toBeTruthy();
+      expect(typeof agent.systemPrompt).toBe("string");
+      expect(agent.systemPrompt.length).toBeGreaterThan(50);
+    }
+  });
+
+  it("every agent system prompt forbids auto-publish", () => {
+    for (const id of [
+      "home-orchestrator",
+      "campaign-planning-specialist",
+      "content-planning-specialist",
+      "content-specialist",
+      "rollout-specialist",
+      "optimize-specialist",
+    ]) {
+      const agent = getAgentDefinition({ id });
+      expect(agent.systemPrompt).toMatch(/do not|forbidden|cannot|denied|never|no auto/i);
+    }
   });
 });
 
