@@ -671,6 +671,62 @@ describe("panda run model", () => {
     expect(plan.assumptions).toContain("Agent supplied plan");
   });
 
+  it("prefers a runtime snapshot plan over the artifact plan when present", () => {
+    const run = createDefaultRun({
+      artifacts: [
+        {
+          id: "agent-plan",
+          name: "Campaign Plan",
+          type: "campaign-plan.v3",
+          content: "Agent-generated plan",
+          phase: "planning",
+          createdAt: "2026-07-05T00:00:00.000Z",
+          data: {
+            heroProduct: "artifact product",
+            markets: ["US"],
+            locales: ["en-US"],
+            audience: ["Artifact audience"],
+            budget: "USD 120k",
+            channels: [],
+            kpis: ["Artifact KPI"],
+            assumptions: ["Artifact supplied plan"]
+          }
+        }
+      ],
+      snapshot: {
+        plan: {
+          campaignId: "camp_04",
+          name: "Snapshot Plan",
+          heroProduct: "snapshot product",
+          markets: ["JP"],
+          locales: ["ja-JP"],
+          audience: ["Snapshot audience"],
+          budget: "JPY 200k",
+          timeline: "Snapshot timeline",
+          channels: [
+            {
+              id: "paid-media",
+              name: "Paid Media",
+              owner: "Paid Media",
+              objective: "Snapshot objective",
+              requiredAssets: ["Search ad headline"],
+              rolloutTarget: "Paid Media"
+            }
+          ],
+          kpis: ["Snapshot KPI"],
+          assumptions: ["Snapshot supplied plan"]
+        }
+      },
+    });
+
+    const plan = campaignPlanForRun(run);
+
+    expect(plan.heroProduct).toBe("snapshot product");
+    expect(plan.markets).toEqual(["JP"]);
+    expect(plan.channels).toHaveLength(1);
+    expect(plan.assumptions).toContain("Snapshot supplied plan");
+  });
+
   it("turns the campaign plan into H1 planning work objects", () => {
     const objects = campaignPlanningObjectsFromPlan(campaignPlanForRun(createDefaultRun()));
 
@@ -788,6 +844,21 @@ describe("panda run model", () => {
       targetId: undefined,
       status: undefined,
       payload: { audience: "MOCN" },
+    });
+  });
+
+  it("accepts update_campaign_plan server updates", () => {
+    const result = normalizeServerUpdates([
+      { action: "update_campaign_plan", note: "Refresh the campaign plan.", payload: { markets: ["JP"] } },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      action: "update_campaign_plan",
+      note: "Refresh the campaign plan.",
+      targetId: undefined,
+      status: undefined,
+      payload: { markets: ["JP"] },
     });
   });
 

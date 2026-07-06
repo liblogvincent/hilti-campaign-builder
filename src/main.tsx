@@ -293,6 +293,13 @@ function App() {
       const packet = (await response.json()) as PandaOrchestratorResponse;
       const serverUpdates = normalizeServerUpdates(packet.updates);
       let serverApplied = false;
+      if (packet.snapshot?.plan) {
+        updateRun((current) => ({
+          ...current,
+          snapshot: packet.snapshot,
+        }));
+        serverApplied = true;
+      }
       for (const update of serverUpdates) {
         if (update.action === "update_planning_object" && targetView === "campaign-planning") {
           serverApplied = applyCampaignPlanningInstructionToWorkspace(update.note) || serverApplied;

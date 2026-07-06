@@ -72,6 +72,24 @@ export type GateDecision = {
   timestamp: string;
 };
 
+export type PandaCampaignSnapshot = {
+  campaign?: {
+    id: string;
+    name: string;
+    brief: string;
+    phase: PhaseId;
+    activeGate: GateId;
+    ownerRole: string;
+    updatedAt: string;
+  };
+  plan?: CampaignPlan;
+  workObjects?: PlanningWorkObject[];
+  contentRequirements?: ContentRequirement[];
+  gateDecisions?: GateDecision[];
+  events?: Array<Record<string, unknown>>;
+  agentThreads?: Array<Record<string, unknown>>;
+};
+
 export type PandaAgentResponse = {
   mode: AgentMode;
   warning?: string;
@@ -90,6 +108,8 @@ export type PandaOrchestratorResponse = {
   suggested_actions: string[];
   route?: string;
   updates?: ServerSpecialistUpdate[];
+  events?: Array<Record<string, unknown>>;
+  snapshot?: PandaCampaignSnapshot;
 };
 
 export type CampaignRun = {
@@ -106,6 +126,7 @@ export type CampaignRun = {
   gateDecisions: GateDecision[];
   nextActions: string[];
   updatedAt: string;
+  snapshot?: PandaCampaignSnapshot;
 };
 
 export type AgentMessage = {
@@ -143,6 +164,7 @@ export type SpecialistAgentResponse = {
 };
 
 export type ServerSpecialistUpdateAction =
+  | "update_campaign_plan"
   | "update_planning_object"
   | "update_content_requirements"
   | "update_content_object"
@@ -1171,6 +1193,7 @@ export function draftSpecialistAgentResponse(view: AppView, question: string, co
 }
 
 const ALLOWED_SERVER_UPDATE_ACTIONS: Set<string> = new Set([
+  "update_campaign_plan",
   "update_planning_object",
   "update_content_requirements",
   "update_content_object",
@@ -1399,6 +1422,7 @@ export function skillCapabilityItems(): SkillCapability[] {
 }
 
 export function campaignPlanForRun(run: CampaignRun): CampaignPlan {
+  if (run.snapshot?.plan) return run.snapshot.plan;
   const agentPlan = campaignPlanFromArtifact(run);
   if (agentPlan) return agentPlan;
 

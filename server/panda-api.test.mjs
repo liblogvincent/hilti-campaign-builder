@@ -312,9 +312,11 @@ describe("panda api handlers", () => {
     const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
     const originalSupabaseUrl = process.env.SUPABASE_URL;
     const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const originalDeepseekKey = process.env.DEEPSEEK_API_KEY;
     delete process.env.SUPABASE_URL;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     process.env.PANDA_RUNTIME_MODE = "local";
+    delete process.env.DEEPSEEK_API_KEY;
 
     const req = createRequest("POST", {
       campaign_id: "camp_04",
@@ -328,6 +330,7 @@ describe("panda api handlers", () => {
     expect(body.answer).toBeTruthy();
     expect(body.mode).toBeTruthy();
 
+    restoreEnvKey("DEEPSEEK_API_KEY", originalDeepseekKey);
     restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
     restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
     restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
@@ -450,6 +453,22 @@ describe("panda api handlers", () => {
 
   it("executes campaign plan updates through Supabase runtime actions", async () => {
     const client = createFakeSupabaseClient({
+      campaigns: {
+        select: [
+          {
+            data: {
+              id: "camp_04",
+              name: "Fixture Campaign",
+              brief: "Plan a campaign",
+              phase: "planning",
+              active_gate: "H1",
+              owner_role: "Campaign Owner",
+              updated_at: "2026-07-06T00:00:00.000Z",
+            },
+            error: null,
+          },
+        ],
+      },
       campaign_plans: {
         select: [
           {
@@ -472,13 +491,110 @@ describe("panda api handlers", () => {
             ],
             error: null,
           },
+          {
+            data: [
+              {
+                id: 11,
+                campaign_id: "camp_04",
+                version: 2,
+                name: "Initial plan",
+                hero_product: "Initial product",
+                markets: ["China", "Japan", "Australia"],
+                locales: ["zh-CN", "ja-JP", "en-AU"],
+                audience: ["Contractors"],
+                budget: "EUR 10k",
+                timeline: "Draft",
+                channels: [],
+                kpis: [],
+                assumptions: [],
+              },
+            ],
+            error: null,
+          },
         ],
         insert: [{ data: null, error: null }],
       },
-      object_revisions: {
-        insert: [{ data: null, error: null }],
+      work_objects: {
+        select: [
+          {
+            data: [
+              {
+                id: "campaign-objective",
+                campaign_id: "camp_04",
+                workspace: "campaign-planning",
+                title: "Campaign Objective",
+                lane: "Strategy",
+                owner_role: "Campaign Owner",
+                status: "draft",
+                gate: "H1",
+                copy: "Initial objective",
+                evidence: [],
+                source: "CampaignPlan",
+                updated_by: "seed",
+                updated_at: "2026-07-06T00:00:00.000Z",
+              },
+            ],
+            error: null,
+          },
+          {
+            data: [
+              {
+                id: "campaign-objective",
+                campaign_id: "camp_04",
+                workspace: "campaign-planning",
+                title: "Campaign Objective",
+                lane: "Strategy",
+                owner_role: "Campaign Owner",
+                status: "draft",
+                gate: "H1",
+                copy: "Initial objective",
+                evidence: [],
+                source: "CampaignPlan",
+                updated_by: "seed",
+                updated_at: "2026-07-06T00:00:00.000Z",
+              },
+            ],
+            error: null,
+          },
+        ],
+        update: [{ data: null, error: null }],
+      },
+      content_requirements: {
+        select: [
+          {
+            data: [],
+            error: null,
+          },
+        ],
+      },
+      gate_decisions: {
+        select: [
+          {
+            data: [],
+            error: null,
+          },
+        ],
       },
       runtime_events: {
+        insert: [{ data: null, error: null }],
+        select: [
+          {
+            data: [
+              {
+                id: "agent_message_03",
+                campaign_id: "camp_04",
+                workspace: "campaign-planning",
+                type: "object_patch",
+                actor: "campaign-planning-specialist",
+                payload: { objectId: "campaign-plan" },
+                created_at: "2026-07-06T00:00:01.000Z",
+              },
+            ],
+            error: null,
+          },
+        ],
+      },
+      object_revisions: {
         insert: [{ data: null, error: null }],
       },
       rpc: {
@@ -544,6 +660,9 @@ describe("panda api handlers", () => {
       type: "object_patch",
       actor: "campaign-planning-specialist",
     });
+    expect(body.snapshot).toBeTruthy();
+    expect(body.snapshot.plan.markets).toEqual(["China", "Japan", "Australia"]);
+    expect(body.snapshot.plan.locales).toEqual(["zh-CN", "ja-JP", "en-AU"]);
     expect(client.operations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -578,6 +697,206 @@ describe("panda api handlers", () => {
     );
 
     callJsonAgentSpy.mockRestore();
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+  });
+
+  it("signals partial success when a later orchestrator update fails after earlier commits", async () => {
+    const client = createFakeSupabaseClient({
+      campaigns: {
+        select: [
+          {
+            data: {
+              id: "camp_04",
+              name: "Fixture Campaign",
+              brief: "Plan a campaign",
+              phase: "planning",
+              active_gate: "H1",
+              owner_role: "Campaign Owner",
+              updated_at: "2026-07-06T00:00:00.000Z",
+            },
+            error: null,
+          },
+        ],
+      },
+      campaign_plans: {
+        select: [
+          {
+            data: [
+              {
+                id: 11,
+                campaign_id: "camp_04",
+                version: 1,
+                name: "Initial plan",
+                hero_product: "Initial product",
+                markets: ["Germany"],
+                locales: ["de-DE"],
+                audience: ["Contractors"],
+                budget: "EUR 10k",
+                timeline: "Draft",
+                channels: [],
+                kpis: [],
+                assumptions: [],
+              },
+            ],
+            error: null,
+          },
+          {
+            data: [
+              {
+                id: 11,
+                campaign_id: "camp_04",
+                version: 2,
+                name: "Initial plan",
+                hero_product: "Initial product",
+                markets: ["China", "Japan", "Australia"],
+                locales: ["zh-CN", "ja-JP", "en-AU"],
+                audience: ["Contractors"],
+                budget: "EUR 10k",
+                timeline: "Draft",
+                channels: [],
+                kpis: [],
+                assumptions: [],
+              },
+            ],
+            error: null,
+          },
+        ],
+        insert: [{ data: null, error: null }],
+      },
+      work_objects: {
+        select: [
+          {
+            data: [
+              {
+                id: "campaign-objective",
+                campaign_id: "camp_04",
+                workspace: "campaign-planning",
+                title: "Campaign Objective",
+                lane: "Strategy",
+                owner_role: "Campaign Owner",
+                status: "draft",
+                gate: "H1",
+                copy: "Initial objective",
+                evidence: [],
+                source: "CampaignPlan",
+                updated_by: "seed",
+                updated_at: "2026-07-06T00:00:00.000Z",
+              },
+            ],
+            error: null,
+          },
+          {
+            data: [
+              {
+                id: "campaign-objective",
+                campaign_id: "camp_04",
+                workspace: "campaign-planning",
+                title: "Campaign Objective",
+                lane: "Strategy",
+                owner_role: "Campaign Owner",
+                status: "draft",
+                gate: "H1",
+                copy: "Initial objective",
+                evidence: [],
+                source: "CampaignPlan",
+                updated_by: "seed",
+                updated_at: "2026-07-06T00:00:00.000Z",
+              },
+            ],
+            error: null,
+          },
+        ],
+        update: [{ data: null, error: new Error("work object write failed") }],
+      },
+      content_requirements: {
+        select: [{ data: [], error: null }],
+      },
+      gate_decisions: {
+        select: [{ data: [], error: null }],
+      },
+      runtime_events: {
+        insert: [{ data: null, error: null }],
+        select: [{ data: [], error: null }],
+      },
+      object_revisions: {
+        insert: [{ data: null, error: null }],
+      },
+      rpc: {
+        persist_agent_turn: [
+          {
+            data: {
+              thread_id: 71,
+              user_message_id: 301,
+              agent_message_id: 302,
+              runtime_event_id: "agent_message_03",
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+    createClientMock.mockReset();
+    createClientMock.mockReturnValue(client.client);
+
+    const callJsonAgentSpy = vi.spyOn(aiTransport, "callJsonAgent").mockResolvedValueOnce({
+      mode: "deepseek",
+      answer: "Plan updated.",
+      highlights: ["Campaign markets changed"],
+      suggested_actions: ["Review the updated plan"],
+      route: "Campaign Planning",
+      updates: [
+        {
+          action: "update_campaign_plan",
+          note: "Expand the plan to China, Japan, and Australia.",
+          payload: { markets: ["China", "Japan", "Australia"], locales: ["zh-CN", "ja-JP", "en-AU"] },
+        },
+        {
+          action: "update_planning_object",
+          targetId: "campaign-objective",
+          note: "Tighten the campaign objective.",
+          status: "revision-requested",
+          payload: { copy: "Updated objective" },
+        },
+      ],
+    });
+
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const originalDeepseekKey = process.env.DEEPSEEK_API_KEY;
+    process.env.PANDA_RUNTIME_MODE = "supabase";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    delete process.env.DEEPSEEK_API_KEY;
+
+    const res = createResponse();
+    await handleOrchestrator(
+      createRequest("POST", {
+        campaign_id: "camp_04",
+        question: "Update the campaign plan for APAC expansion.",
+        agent_scope: { id: "campaign-planning-specialist", view: "campaign-planning" },
+      }),
+      res,
+    );
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(503);
+    expect(body.partial).toBe(true);
+    expect(body.events).toHaveLength(1);
+    expect(body.committed_update_count).toBe(1);
+    expect(body.failed_update_action).toBe("update_planning_object");
+    expect(body.retry).toMatchObject({
+      campaign_id: "camp_04",
+      workspace: "campaign-planning",
+      actor: "campaign-planning-specialist",
+      pending_actions: ["update_planning_object"],
+    });
+    expect(body.snapshot.plan.markets).toEqual(["China", "Japan", "Australia"]);
+
+    callJsonAgentSpy.mockRestore();
+    restoreEnvKey("DEEPSEEK_API_KEY", originalDeepseekKey);
     restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
     restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
     restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);

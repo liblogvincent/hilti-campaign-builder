@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { callJsonAgent } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
+import { loadCampaignSnapshot } from "./campaign-runtime.mjs";
 import { executeRuntimeAction } from "./object-runtime.mjs";
 import { persistAgentTurn } from "./agent-runtime.mjs";
 import { buildFallback, buildIntegrationPackage, buildOrchestratorAnswer } from "./panda-packets.mjs";
@@ -417,14 +418,54 @@ function buildUpdateFailureBody(result, error) {
   };
 }
 
+function buildPartialUpdateFailureBody({
+  result,
+  error,
+  committedEvents,
+  committedUpdates,
+  failedUpdateIndex,
+  failedUpdate,
+  campaignId,
+  workspace,
+  actor,
+  snapshot,
+}) {
+  const body = {
+    ...buildUpdateFailureBody(result, error),
+    partial: true,
+    events: committedEvents,
+    committed_update_count: committedUpdates.length,
+    failed_update_index: failedUpdateIndex,
+    failed_update_action: failedUpdate.action,
+    retry: {
+      campaign_id: campaignId,
+      workspace,
+      actor,
+      pending_update_count: Array.isArray(result.updates) ? result.updates.length - failedUpdateIndex : undefined,
+      pending_actions: Array.isArray(result.updates)
+        ? result.updates.slice(failedUpdateIndex).map((update) => update.action)
+        : undefined,
+    },
+  };
+
+  if (failedUpdate.targetId) body.failed_update_target_id = failedUpdate.targetId;
+  if (failedUpdate.status) body.failed_update_status = failedUpdate.status;
+  if (snapshot) body.snapshot = snapshot;
+
+  return body;
+}
+
 async function executeOrchestratorUpdates({ mode, supabase, result, campaignId, workspace, actor }) {
   if (mode !== "supabase" || !supabase || !Array.isArray(result.updates) || result.updates.length === 0) {
     return { ok: true, result };
   }
 
-  try {
-    const executions = [];
-    for (const update of result.updates) {
+  const committedEvents = [];
+  const committedUpdates = [];
+
+  for (let index = 0; index < result.updates.length; index += 1) {
+    const update = result.updates[index];
+    try {
       const execution = await executeRuntimeAction({
         action: update,
         campaignId,
@@ -432,25 +473,60 @@ async function executeOrchestratorUpdates({ mode, supabase, result, campaignId, 
         actor,
         supabase,
       });
-      executions.push(execution);
+      committedUpdates.push(update);
+      if (Array.isArray(execution.events)) committedEvents.push(...execution.events);
+    } catch (error) {
+      const snapshot = committedEvents.length > 0
+        ? await loadCampaignSnapshot({ campaignId, supabase, fixture: null }).catch(() => undefined)
+        : undefined;
+
+      return {
+        ok: false,
+        status: 503,
+        body:
+          committedEvents.length > 0
+            ? buildPartialUpdateFailureBody({
+                result,
+                error,
+                committedEvents,
+                committedUpdates,
+                failedUpdateIndex: index,
+                failedUpdate: update,
+                campaignId,
+                workspace,
+                actor,
+                snapshot,
+              })
+            : buildUpdateFailureBody(result, error),
+      };
     }
+  }
 
-    const events = executions.flatMap((execution) => (Array.isArray(execution.events) ? execution.events : []));
-    const snapshots = executions.map((execution) => execution.snapshot).filter((snapshot) => snapshot !== undefined);
-
+  try {
+    const snapshot = await loadCampaignSnapshot({ campaignId, supabase, fixture: null });
     return {
       ok: true,
       result: {
         ...result,
-        ...(events.length > 0 ? { events } : {}),
-        ...(snapshots.length > 0 ? { snapshot: snapshots[snapshots.length - 1] } : {}),
+        events: committedEvents,
+        snapshot,
       },
     };
   } catch (error) {
     return {
       ok: false,
       status: 503,
-      body: buildUpdateFailureBody(result, error),
+      body: buildPartialUpdateFailureBody({
+        result,
+        error,
+        committedEvents,
+        committedUpdates,
+        failedUpdateIndex: committedUpdates.length,
+        failedUpdate: result.updates[committedUpdates.length - 1] ?? result.updates[0],
+        campaignId,
+        workspace,
+        actor,
+      }),
     };
   }
 }
