@@ -17,4 +17,4 @@
 - None beyond normal snapshot-data freshness; the UI only shows events already present in `runtimeSnapshot.events`.
 
 ## Commit Hash
-- `6e5bca56b651867c74ddb3b979b60ea59fad9032`
+- `79a8e9c24240a44a8ada1bf6e9b24c7872a84220`
