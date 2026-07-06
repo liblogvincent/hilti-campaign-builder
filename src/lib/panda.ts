@@ -117,6 +117,7 @@ export type AgentMessage = {
 export type HomeIntent =
   | { type: "chat" }
   | { type: "status" }
+  | { type: "plan-campaign" }
   | { type: "create-campaign" }
   | { type: "update-campaign" }
   | { type: "route"; view: AppView };
@@ -876,12 +877,22 @@ export function classifyHomeIntent(prompt: string): HomeIntent {
   if (!text) return { type: "chat" };
   const route = routeIntent(text);
   if (route) return { type: "route", view: route };
+  if (/\b(create|start|launch|build|plan)\b/.test(text) && /\bcampaign\b/.test(text)) {
+    if (/\b(now|confirm|go ahead|create it|use this brief|ready to create)\b/.test(text) || hasCampaignBriefMinimum(text)) {
+      return { type: "create-campaign" };
+    }
+    return { type: "plan-campaign" };
+  }
   if (/\b(status|progress|blocked|blocker|missing|ready|where are we)\b/.test(text)) return { type: "status" };
   if (/\b(update|change|revise|adjust|edit)\b/.test(text) && /\b(campaign|plan|planning|brief|objective|audience|kpi|budget|channel)\b/.test(text)) {
     return { type: "update-campaign" };
   }
-  if (/\b(create|start|launch|build|plan)\b/.test(text) && /\bcampaign\b/.test(text)) return { type: "create-campaign" };
   return { type: "chat" };
+}
+
+export function buildHomeCampaignDiscoveryReply(prompt: string) {
+  const product = extractProductMention(prompt) || "the product";
+  return `I can help plan a campaign for ${product}, but I should not create the campaign workspace yet. To make the brief usable, tell me the audience, markets/locales, primary channels, budget or scale, KPIs, and timing. You can answer in one sentence, then say "create it" when you want me to create the campaign workspace.`;
 }
 
 export function isHomeCampaignCreationIntent(prompt: string): boolean {
@@ -918,6 +929,18 @@ export function compactAgentMessages<T extends { id: string; role: string; text:
 
 function normalizeMessageText(text: string) {
   return text.trim().replace(/\s+/g, " ");
+}
+
+function hasCampaignBriefMinimum(text: string) {
+  const hasAudience = /\b(for|target|audience|persona|mocn|contractor|specifier|installer|manager)\b/.test(text);
+  const hasMarket = /\b(dach|emea|eu|de|at|ch|nl|be|markets?|locales?)\b/.test(text);
+  const hasChannel = /\b(linkedin|google|meta|email|hol|landing page|sprinklr|sfmc|paid media|channels?)\b/.test(text);
+  return hasAudience && hasMarket && hasChannel;
+}
+
+function extractProductMention(prompt: string) {
+  const match = prompt.match(/\b(TE\d{2}(?:-\d{2})?|TE\s?\d{2}(?:\s?AVR)?|SIW\s?6AT-A22|[A-Z]{2,5}\d{1,3}(?:-\d{1,3})?)\b/i);
+  return match?.[1]?.replace(/\s+/g, " ").toUpperCase();
 }
 
 function routeIntent(text: string): AppView | undefined {

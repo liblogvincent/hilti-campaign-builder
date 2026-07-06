@@ -43,6 +43,7 @@ import {
   CampaignPlan,
   CampaignRun,
   CampaignWorkspace,
+  buildHomeCampaignDiscoveryReply,
   classifyHomeIntent,
   compactAgentMessages,
   ContentWorkObject,
@@ -472,6 +473,17 @@ function App() {
           actions: packet.suggested_actions
         }
       ]);
+    } catch (error) {
+      setGlobalPandaMessages((items) => [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          text: error instanceof Error
+            ? `I could not reach the live orchestrator, but I am still here. I understood: "${question}". Tell me the audience, markets, channels, KPI, budget, or timing you want to add, and I will keep shaping the brief.`
+            : `I am still here. I understood: "${question}". Tell me the audience, markets, channels, KPI, budget, or timing you want to add, and I will keep shaping the brief.`
+        }
+      ]);
     } finally {
       setGlobalPandaBusy(false);
     }
@@ -484,6 +496,23 @@ function App() {
 
     if (intent.type === "create-campaign") {
       createCampaignFromPrompt(prompt);
+      return;
+    }
+    if (intent.type === "plan-campaign") {
+      setHomePrompt("");
+      addMessage(run.campaignId, { role: "user", text: prompt });
+      setGlobalPandaOpen(false);
+      setGlobalPandaMessages((items) => [
+        ...items,
+        { id: crypto.randomUUID(), role: "user", text: prompt },
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          text: buildHomeCampaignDiscoveryReply(prompt),
+          highlights: ["Brief discovery", "No campaign created yet", "Waiting for audience/market/channel detail"],
+          actions: ["Answer brief questions", "Say create it when ready"]
+        }
+      ]);
       return;
     }
     if (intent.type === "route") {

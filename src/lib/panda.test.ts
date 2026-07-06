@@ -22,6 +22,7 @@ import {
   buildLeadershipFeedbackProposal,
   buildPlanPreviewSlides,
   buildContentPlanningBridge,
+  buildHomeCampaignDiscoveryReply,
   campaignConversationKey,
   classifyHomeIntent,
   contentPlanningBridgeReadiness,
@@ -154,7 +155,8 @@ describe("panda run model", () => {
   });
 
   it("keeps the home orchestrator on Home after campaign creation intent", () => {
-    expect(isHomeCampaignCreationIntent("launch a campaign of TE70")).toBe(true);
+    expect(isHomeCampaignCreationIntent("launch a campaign of TE70")).toBe(false);
+    expect(classifyHomeIntent("launch a campaign of TE70").type).toBe("plan-campaign");
     expect(isHomeCampaignCreationIntent("what is blocked before H2?")).toBe(false);
     expect(homeRouteAfterCampaignLaunch("launch a campaign of TE70")).toBe("home");
     expect(homeRouteAfterCampaignLaunch("   ")).toBe("home");
@@ -164,9 +166,20 @@ describe("panda run model", () => {
     expect(classifyHomeIntent("hello").type).toBe("chat");
     expect(classifyHomeIntent("what is the campaign status?").type).toBe("status");
     expect(classifyHomeIntent("open content planning").type).toBe("route");
-    expect(classifyHomeIntent("launch a campaign for TE60-22").type).toBe("create-campaign");
+    expect(classifyHomeIntent("launch a campaign for TE60-22").type).toBe("plan-campaign");
+    expect(classifyHomeIntent("create campaign now for TE60-22 for MOCN audience in DACH").type).toBe("create-campaign");
     expect(classifyHomeIntent("update the current campaign to focus on TE60-22").type).toBe("update-campaign");
     expect(isHomeCampaignCreationIntent("hello campaign")).toBe(false);
+  });
+
+  it("asks campaign brief questions before creating a shallow campaign", () => {
+    const reply = buildHomeCampaignDiscoveryReply("launch a campaign for TE60-22");
+
+    expect(reply).toContain("TE60-22");
+    expect(reply).toContain("audience");
+    expect(reply).toContain("markets");
+    expect(reply).toContain("channels");
+    expect(reply).toContain("create it");
   });
 
   it("restores a persisted app view only when it is valid", () => {
