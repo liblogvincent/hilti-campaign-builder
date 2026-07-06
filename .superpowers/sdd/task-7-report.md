@@ -40,7 +40,7 @@ Completed.
 
 ## Task 7 Cache Invalidation Fix Report
 - Files changed: `src/main.tsx`, `.superpowers/sdd/task-7-report.md`
-- Tests run: pending
-- Commit hash: pending
+- Tests run: `npm run build`, `npm test`
+- Commit hash: `ee642a8`
 - Self-review: snapshot acceptance now clears the per-campaign planning, content requirement, content object, and rollout object caches so the UI recomputes from the durable snapshot plan instead of stale derived objects.
 - Concerns: this is the narrow bridge for Task 7 only; Task 8 still needs the fuller snapshot-driven workspace hydration path.
