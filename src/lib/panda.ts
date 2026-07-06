@@ -209,6 +209,28 @@ export function runtimeSnapshotHasEvidence(raw: unknown): boolean {
   ].some(hasRuntimeRecords);
 }
 
+export function runtimeSnapshotsFromWorkspace(workspace: CampaignWorkspace) {
+  return workspace.campaigns.reduce<Record<string, CampaignRuntimeSnapshot>>((accumulator, campaign) => {
+    if (!campaign.snapshot || !runtimeSnapshotHasEvidence(campaign.snapshot)) return accumulator;
+    accumulator[campaign.campaignId] = normalizeCampaignSnapshot(campaign.snapshot);
+    return accumulator;
+  }, {});
+}
+
+export function runtimeSnapshotEvidenceFromWorkspace(workspace: CampaignWorkspace) {
+  return workspace.campaigns.reduce<Record<string, boolean>>((accumulator, campaign) => {
+    if (!campaign.snapshot) return accumulator;
+    if (runtimeSnapshotHasEvidence(campaign.snapshot)) {
+      accumulator[campaign.campaignId] = true;
+    }
+    return accumulator;
+  }, {});
+}
+
+export function shouldSuppressLocalReplay(packet: Pick<PandaOrchestratorResponse, "snapshot" | "no_replay" | "snapshot_status">) {
+  return runtimeSnapshotHasEvidence(packet.snapshot) || packet.no_replay || packet.snapshot_status === "unavailable_after_commit";
+}
+
 function normalizeCampaignRecord(record: Record<string, unknown>) {
   return {
     id: stringValue(record.id) || stringValue(record.campaignId) || stringValue(record.campaign_id) || "campaign-unknown",

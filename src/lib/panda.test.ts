@@ -50,6 +50,9 @@ import {
   normalizeCampaignSnapshot,
   runtimeSnapshotCampaignId,
   runtimeSnapshotHasEvidence,
+  runtimeSnapshotEvidenceFromWorkspace,
+  runtimeSnapshotsFromWorkspace,
+  shouldSuppressLocalReplay,
   workspaceAgentMessageKey
 } from "./panda";
 
@@ -821,6 +824,36 @@ describe("panda run model", () => {
     expect(runtimeSnapshotHasEvidence({ events: [] })).toBe(false);
     expect(runtimeSnapshotHasEvidence({ workObjects: [] })).toBe(false);
     expect(runtimeSnapshotHasEvidence({ events: [{ id: "evt_1" }] })).toBe(true);
+  });
+
+  it("loads workspace runtime snapshots only when they have evidence", () => {
+    const workspace = {
+      activeCampaignId: "camp_04",
+      campaigns: [
+        {
+          ...createDefaultRun(),
+          campaignId: "camp_04",
+          snapshot: { events: [{ id: "evt_1" }] }
+        },
+        {
+          ...createDefaultRun(),
+          campaignId: "camp_05",
+          snapshot: {}
+        }
+      ],
+      messages: { camp_04: [], camp_05: [] }
+    };
+
+    expect(runtimeSnapshotsFromWorkspace(workspace)).toHaveProperty("camp_04");
+    expect(runtimeSnapshotsFromWorkspace(workspace)).not.toHaveProperty("camp_05");
+    expect(runtimeSnapshotEvidenceFromWorkspace(workspace)).toEqual({ camp_04: true });
+  });
+
+  it("suppresses local replay only for evidence, explicit no-replay, or commit-unavailable snapshots", () => {
+    expect(shouldSuppressLocalReplay({ snapshot: {}, no_replay: false })).toBe(false);
+    expect(shouldSuppressLocalReplay({ snapshot: { events: [{ id: "evt_1" }] }, no_replay: false })).toBe(true);
+    expect(shouldSuppressLocalReplay({ snapshot: {}, no_replay: true })).toBe(true);
+    expect(shouldSuppressLocalReplay({ snapshot: {}, snapshot_status: "unavailable_after_commit" })).toBe(true);
   });
 
   it("keeps the active campaign id when a runtime snapshot id is malformed", () => {

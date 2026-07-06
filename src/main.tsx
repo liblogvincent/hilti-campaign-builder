@@ -68,6 +68,9 @@ import {
   normalizeCampaignSnapshot,
   runtimeSnapshotCampaignId,
   runtimeSnapshotHasEvidence,
+  runtimeSnapshotEvidenceFromWorkspace,
+  runtimeSnapshotsFromWorkspace,
+  shouldSuppressLocalReplay,
   PandaAgentResponse,
   PandaArtifact,
   PandaOrchestratorResponse,
@@ -133,8 +136,8 @@ function App() {
   const [runtimeSnapshotEvidence, setRuntimeSnapshotEvidence] = useState<Record<string, boolean>>(() => runtimeSnapshotEvidenceFromWorkspace(initialWorkspace));
 
   const run = workspace.campaigns.find((campaign) => campaign.campaignId === workspace.activeCampaignId) ?? workspace.campaigns[0];
-  const runtimeSnapshot = runtimeSnapshots[run.campaignId];
   const runtimeSnapshotHasVisibleEvidence = runtimeSnapshotEvidence[run.campaignId] ?? false;
+  const runtimeSnapshot = runtimeSnapshotHasVisibleEvidence ? runtimeSnapshots[run.campaignId] : undefined;
   const activePhase = currentPhaseMeta(run.phase);
   const phaseGate = run.currentGate?.id === activePhase.gate ? run.currentGate : undefined;
   const activeGateDecisions = runtimeSnapshot?.gateDecisions ?? run.gateDecisions;
@@ -306,12 +309,11 @@ function App() {
       const packet = (await response.json()) as PandaOrchestratorResponse;
       const serverUpdates = normalizeServerUpdates(packet.updates);
       let serverApplied = false;
-      const hasRuntimeSnapshot = Boolean(packet.snapshot);
-      const suppressLocalReplay = hasRuntimeSnapshot || packet.no_replay || packet.snapshot_status === "unavailable_after_commit";
-      if (hasRuntimeSnapshot) {
+      const snapshotHasEvidence = runtimeSnapshotHasEvidence(packet.snapshot);
+      const suppressLocalReplay = shouldSuppressLocalReplay(packet);
+      if (snapshotHasEvidence) {
         const snapshot = normalizeCampaignSnapshot(packet.snapshot);
         const snapshotCampaignId = runtimeSnapshotCampaignId(packet.snapshot, run.campaignId);
-        const snapshotHasEvidence = runtimeSnapshotHasEvidence(packet.snapshot);
         setRuntimeSnapshots((current) => ({ ...current, [snapshotCampaignId]: snapshot }));
         setRuntimeSnapshotEvidence((current) => ({ ...current, [snapshotCampaignId]: snapshotHasEvidence }));
         updateRun((current) => ({
@@ -1574,7 +1576,6 @@ function WorkflowShell({
           objects={planningObjects}
           readiness={planningReadiness}
           requirements={contentRequirements}
-          runtimeSnapshot={runtimeSnapshot}
           runtimeSnapshotHasEvidence={runtimeSnapshotHasVisibleEvidence}
           onApplyFeedback={onApplyCampaignPlanningFeedback}
           onUpdate={onUpdatePlanningObject}
@@ -1629,7 +1630,6 @@ function CampaignPlanningWorkspace({
   objects,
   readiness,
   requirements,
-  runtimeSnapshot,
   runtimeSnapshotHasEvidence,
   onApplyFeedback,
   onUpdate
@@ -1638,7 +1638,6 @@ function CampaignPlanningWorkspace({
   objects: PlanningWorkObject[];
   readiness: PlanningReadiness;
   requirements: ContentRequirement[];
-  runtimeSnapshot?: CampaignRuntimeSnapshot;
   runtimeSnapshotHasEvidence: boolean;
   onApplyFeedback: (proposal: LeadershipFeedbackProposal) => void;
   onUpdate: (id: string, status: WorkObjectStatus, comment: string) => void;
@@ -2675,24 +2674,6 @@ function loadWorkspace(): CampaignWorkspace {
   } catch {
     return createDefaultWorkspace();
   }
-}
-
-function runtimeSnapshotsFromWorkspace(workspace: CampaignWorkspace) {
-  return workspace.campaigns.reduce<Record<string, CampaignRuntimeSnapshot>>((accumulator, campaign) => {
-    if (!campaign.snapshot) return accumulator;
-    accumulator[campaign.campaignId] = normalizeCampaignSnapshot(campaign.snapshot);
-    return accumulator;
-  }, {});
-}
-
-function runtimeSnapshotEvidenceFromWorkspace(workspace: CampaignWorkspace) {
-  return workspace.campaigns.reduce<Record<string, boolean>>((accumulator, campaign) => {
-    if (!campaign.snapshot) return accumulator;
-    if (runtimeSnapshotHasEvidence(campaign.snapshot)) {
-      accumulator[campaign.campaignId] = true;
-    }
-    return accumulator;
-  }, {});
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

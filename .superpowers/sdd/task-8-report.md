@@ -41,3 +41,10 @@ Done.
 - Commit hash: 70188d0
 - Self-review: `resetWorkspace()` now clears the runtime evidence map along with runtime snapshots, preventing stale runtime provenance badges after reset.
 - Concerns: no component-level reset regression test exists; verification is through full build/test suite.
+
+## Task 8 Runtime Snapshot Evidence Gate Fix Report
+- Files changed: `src/main.tsx`, `src/lib/panda.ts`, `src/lib/panda.test.ts`, `.superpowers/sdd/task-8-report.md`
+- Tests run: `npm test -- src/lib/panda.test.ts` - passed; `npm test` - passed; `npm run build` - passed
+- Commit hash: `20eb64caed734362ee25c5ad8abfac79f1f8c5c8`
+- Self-review: runtime snapshots now hydrate only when `runtimeSnapshotHasEvidence(rawSnapshot)` is true; persisted workspace snapshots use the same evidence gate; local replay suppression now follows evidence, `no_replay`, or `unavailable_after_commit`; and the unused `runtimeSnapshot` prop was removed from `CampaignPlanningWorkspace`.
+- Concerns: if orchestrator payloads change their evidence shape, the shared helper will need to be extended so empty snapshots still stay out of the live UI.
