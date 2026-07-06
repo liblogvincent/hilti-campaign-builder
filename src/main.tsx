@@ -2426,8 +2426,7 @@ function AgentPanel({
           <input ref={fileRef} type="file" multiple onChange={(event) => addAttachments(event.target.files)} />
           <div className="composerTools">
             <button title="Upload file" aria-label="Upload file" onClick={() => fileRef.current?.click()}><Plus size={15} /></button>
-            <button title="Use evidence" aria-label="Use evidence" onClick={() => onAgentInputChange(agentInput || "Use the available campaign evidence for this workspace answer.")}><Paperclip size={14} /></button>
-            <button title="Use skills" aria-label="Use skills" onClick={() => onAgentInputChange(agentInput || "Use the relevant Panda skills for this workspace.")}><Sparkles size={14} /></button>
+            <button title="Use skills / evidence" aria-label="Use skills / evidence" onClick={() => onAgentInputChange(agentInput || "Use the relevant Panda skills and campaign evidence for this workspace.")}><Sparkles size={14} /></button>
           </div>
           <select className="modelSelectCompact" aria-label="Model placeholder" defaultValue="deepseek" title="DeepSeek model">
             <option value="deepseek">DS</option>

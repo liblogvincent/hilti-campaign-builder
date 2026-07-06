@@ -4662,6 +4662,16 @@ footer {
   background: #fbfbfa;
 }
 
+.compactMessages .message div {
+  max-width: 84%;
+  min-width: 0;
+}
+
+.compactMessages .message p {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
 .figmaComposer {
   flex: 0 0 auto;
   margin: 0;
@@ -4686,11 +4696,11 @@ footer {
 
 .composerToolbar {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: auto auto 72px minmax(92px, 1fr);
   width: 100%;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding-top: 8px;
   border-top: 1px solid #f0f1f3;
 }
@@ -4724,7 +4734,7 @@ footer {
 }
 
 .composerToolbar select {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1;
   width: 52px;
   min-width: 0;
@@ -4739,10 +4749,10 @@ footer {
 }
 
 .composerToolbar .sendRound {
-  grid-column: 3;
+  grid-column: 4;
   grid-row: 1;
   width: auto;
-  min-width: 72px;
+  min-width: 92px;
   min-height: 30px;
   display: inline-flex;
   align-items: center;
