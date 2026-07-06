@@ -902,6 +902,111 @@ describe("panda api handlers", () => {
     restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
   });
 
+  it("returns committed events when snapshot refresh fails after orchestrator updates commit", async () => {
+    const client = createFakeSupabaseClient({
+      campaigns: {
+        select: [{ data: null, error: new Error("snapshot unavailable") }],
+      },
+      campaign_plans: {
+        select: [
+          {
+            data: [
+              {
+                id: 11,
+                campaign_id: "camp_04",
+                version: 1,
+                name: "Initial plan",
+                hero_product: "Initial product",
+                markets: ["Germany"],
+                locales: ["de-DE"],
+                audience: ["Contractors"],
+                budget: "EUR 10k",
+                timeline: "Draft",
+                channels: [],
+                kpis: [],
+                assumptions: [],
+              },
+            ],
+            error: null,
+          },
+        ],
+        insert: [{ data: null, error: null }],
+      },
+      runtime_events: {
+        insert: [{ data: null, error: null }],
+      },
+      object_revisions: {
+        insert: [{ data: null, error: null }],
+      },
+      rpc: {
+        persist_agent_turn: [
+          {
+            data: {
+              thread_id: 71,
+              user_message_id: 301,
+              agent_message_id: 302,
+              runtime_event_id: "agent_message_03",
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+    createClientMock.mockReset();
+    createClientMock.mockReturnValue(client.client);
+
+    const callJsonAgentSpy = vi.spyOn(aiTransport, "callJsonAgent").mockResolvedValueOnce({
+      mode: "deepseek",
+      answer: "Plan updated.",
+      highlights: ["Campaign markets changed"],
+      suggested_actions: ["Review the updated plan"],
+      route: "Campaign Planning",
+      updates: [
+        {
+          action: "update_campaign_plan",
+          note: "Expand the plan to China, Japan, and Australia.",
+          payload: { markets: ["China", "Japan", "Australia"], locales: ["zh-CN", "ja-JP", "en-AU"] },
+        },
+      ],
+    });
+
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const originalDeepseekKey = process.env.DEEPSEEK_API_KEY;
+    process.env.PANDA_RUNTIME_MODE = "supabase";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    delete process.env.DEEPSEEK_API_KEY;
+
+    const res = createResponse();
+    await handleOrchestrator(
+      createRequest("POST", {
+        campaign_id: "camp_04",
+        question: "Update the campaign plan for APAC expansion.",
+        agent_scope: { id: "campaign-planning-specialist", view: "campaign-planning" },
+      }),
+      res,
+    );
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.events).toHaveLength(1);
+    expect(body.snapshot).toBeUndefined();
+    expect(body.snapshot_status).toBe("unavailable_after_commit");
+    expect(body.committed_update_count).toBe(1);
+    expect(body.warning).toContain("updates committed");
+    expect(body.warning).toContain("snapshot unavailable");
+    expect(body.failed_update_action).toBeUndefined();
+    expect(body.retry).toBeUndefined();
+
+    callJsonAgentSpy.mockRestore();
+    restoreEnvKey("DEEPSEEK_API_KEY", originalDeepseekKey);
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+  });
+
   it("returns a persistence failure when Supabase RPC fails for agent turns", async () => {
     const client = createFakeSupabaseClient({
       rpc: {

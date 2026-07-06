@@ -418,6 +418,11 @@ function buildUpdateFailureBody(result, error) {
   };
 }
 
+function appendWarning(result, warning) {
+  const existing = typeof result.warning === "string" && result.warning.trim() ? result.warning.trim() : "";
+  return existing ? `${existing} ${warning}` : warning;
+}
+
 function buildPartialUpdateFailureBody({
   result,
   error,
@@ -513,20 +518,16 @@ async function executeOrchestratorUpdates({ mode, supabase, result, campaignId, 
       },
     };
   } catch (error) {
+    const details = error instanceof Error ? error.message : "Durable runtime snapshot refresh failed";
     return {
-      ok: false,
-      status: 503,
-      body: buildPartialUpdateFailureBody({
-        result,
-        error,
-        committedEvents,
-        committedUpdates,
-        failedUpdateIndex: committedUpdates.length,
-        failedUpdate: result.updates[committedUpdates.length - 1] ?? result.updates[0],
-        campaignId,
-        workspace,
-        actor,
-      }),
+      ok: true,
+      result: {
+        ...result,
+        events: committedEvents,
+        warning: appendWarning(result, `Durable runtime updates committed, but snapshot refresh failed: ${details}`),
+        snapshot_status: "unavailable_after_commit",
+        committed_update_count: committedUpdates.length,
+      },
     };
   }
 }
