@@ -92,7 +92,6 @@ async function ensureThreadId({ campaignId, workspace, agentId, supabase }) {
       workspace,
       agent_id: agentId,
       visible_to_workspace: true,
-      owner_id: null,
     }, { onConflict: "campaign_id,workspace,agent_id" })
     .select("id")
     .single();

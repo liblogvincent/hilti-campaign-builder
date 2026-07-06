@@ -65,7 +65,7 @@ Tests run:
 - `npm test` - passed
 
 Commit hash:
-- `6c6dad8` - `fix: make agent turn persistence atomic`
+- `376bd6b` - `fix: make agent turn persistence atomic`
 
 Self-review:
 - `persistAgentTurn()` now goes through one `supabase.rpc("persist_agent_turn", ...)` call, so thread, message, and runtime-event writes happen in one database transaction.

@@ -602,7 +602,6 @@ describe("agent runtime messages", () => {
             workspace: "campaign-planning",
             agent_id: "campaign-planning-specialist",
             visible_to_workspace: true,
-            owner_id: null,
           }),
           options: expect.objectContaining({
             onConflict: "campaign_id,workspace,agent_id",
