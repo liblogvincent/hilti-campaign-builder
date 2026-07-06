@@ -49,6 +49,24 @@ describe("panda server packets", () => {
     expect(types).toContain("knowledge-promotion-candidates");
   });
 
+  it("builds H2 content planning as a CP1-CP4 bridge package", () => {
+    const packet = buildFallback({ phase: "content", campaign_id: "camp_04" });
+    const types = packet.artifacts.map((artifact) => artifact.type);
+
+    expect(packet.gate.id).toBe("H2");
+    expect(packet.summary).toContain("CP1");
+    expect(packet.summary).toContain("CP4");
+    expect(types).toContain("cp1-creative-concept");
+    expect(types).toContain("cp2-cross-channel-requirements");
+    expect(types).toContain("cp3-storyboard-package");
+    expect(types).toContain("cp4-figma-mapping");
+    expect(
+      packet.artifacts
+        .filter((artifact) => artifact.type.startsWith("cp"))
+        .every((artifact) => artifact.gate === "H2" && artifact.evidence),
+    ).toBe(true);
+  });
+
   it("builds the H1 campaign-plan artifact from the submitted brief", () => {
     const packet = buildFallback({
       phase: "planning",

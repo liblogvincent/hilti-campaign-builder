@@ -32,6 +32,7 @@ import {
   applyContentPlanningInstruction,
   AppView,
   buildLeadershipFeedbackProposal,
+  buildContentPlanningBridge,
   buildPlanPreviewSlides,
   buildAgentScope,
   buildPandaContextPacket,
@@ -42,7 +43,10 @@ import {
   CampaignRun,
   CampaignWorkspace,
   ContentWorkObject,
+  ContentPlanningApprovalStatus,
+  ContentPlanningBridge,
   ContentRequirement,
+  contentPlanningBridgeReadiness,
   contentRequirementsFromPlan,
   contentWorkspaceReadiness,
   createCampaignFromBrief,
@@ -1708,13 +1712,31 @@ function ContentPlanningBoard({
   requirements: ContentRequirement[];
   onApplyInstruction: (instruction: string) => boolean;
 }) {
-  const [tab, setTab] = useState<"work" | "preview" | "feedback" | "versions">("work");
+  const bridge = useMemo(() => buildContentPlanningBridge(plan, requirements), [plan, requirements]);
+  const [tab, setTab] = useState<"concept" | "requirements" | "storyboard" | "figma" | "preview" | "feedback" | "versions">("concept");
+  const [approvals, setApprovals] = useState<Record<keyof ContentPlanningBridge, ContentPlanningApprovalStatus>>({
+    creativeConcept: bridge.creativeConcept.status,
+    requirements: bridge.requirements.status,
+    storyboard: bridge.storyboard.status,
+    figmaBoard: bridge.figmaBoard.status
+  });
   const [versions, setVersions] = useState<string[]>([]);
+  const approvedBridge: ContentPlanningBridge = {
+    creativeConcept: { ...bridge.creativeConcept, status: approvals.creativeConcept },
+    requirements: { ...bridge.requirements, status: approvals.requirements },
+    storyboard: { ...bridge.storyboard, status: approvals.storyboard },
+    figmaBoard: { ...bridge.figmaBoard, status: approvals.figmaBoard }
+  };
+  const readiness = contentPlanningBridgeReadiness(approvedBridge);
   const channels = Array.from(new Set(requirements.map((item) => item.channel)));
   const locales = Array.from(new Set(requirements.map((item) => item.locale)));
   const rolloutTargets = Array.from(new Set(requirements.map((item) => item.rolloutTarget)));
   const priorityItems = requirements.slice(0, 4);
   const slides = buildPlanPreviewSlides("content-planning", plan, requirements);
+
+  function updateApproval(key: keyof ContentPlanningBridge, status: ContentPlanningApprovalStatus) {
+    setApprovals((current) => ({ ...current, [key]: status }));
+  }
 
   function downloadDeck() {
     const filename = simulatedPlanDeckFilename("content-planning", plan.campaignId, versions.length + 1);
@@ -1724,7 +1746,18 @@ function ContentPlanningBoard({
 
   return (
     <div className="contentPlanningBoard">
-      <PlanPacketTabs active={tab} onChange={setTab} workLabel="Requirement Matrix" />
+      <ContentPlanningTabs active={tab} onChange={setTab} />
+
+      <section className={readiness.readyForH2 ? "cpReadiness ready" : "cpReadiness"}>
+        <div>
+          <small>H2 readiness</small>
+          <strong>{readiness.approved}/4 CP packages approved</strong>
+          <p>{readiness.readyForH2 ? "Final H2 approval is ready." : `Pending before H2: ${readiness.pending.join(", ")}`}</p>
+        </div>
+        <button disabled={!readiness.readyForH2}>
+          <Check size={16} /> Final H2 approval
+        </button>
+      </section>
 
       {tab === "preview" && (
         <PlanPreviewPanel
@@ -1749,7 +1782,19 @@ function ContentPlanningBoard({
 
       {tab === "versions" && <VersionHistoryPanel versions={versions} empty="No content planning deck has been shared yet." />}
 
-      {tab === "work" && (
+      {tab === "concept" && (
+        <CreativeConceptPanel packageData={approvedBridge.creativeConcept} onUpdate={(status) => updateApproval("creativeConcept", status)} />
+      )}
+
+      {tab === "storyboard" && (
+        <StoryboardPanel packageData={approvedBridge.storyboard} onUpdate={(status) => updateApproval("storyboard", status)} />
+      )}
+
+      {tab === "figma" && (
+        <FigmaBoardPanel packageData={approvedBridge.figmaBoard} onUpdate={(status) => updateApproval("figmaBoard", status)} />
+      )}
+
+      {tab === "requirements" && (
       <>
       <section className="handoffSourcePanel">
         <div>
@@ -1799,9 +1844,127 @@ function ContentPlanningBoard({
           <strong>Next handoff to Content workspace</strong>
         </div>
         <ContentRequirementMatrix requirements={requirements} featuredIds={new Set(priorityItems.map((item) => item.id))} />
+        <ObjectApprovalStrip status={approvedBridge.requirements.status} onUpdate={(status) => updateApproval("requirements", status)} />
       </section>
       </>
       )}
+    </div>
+  );
+}
+
+function ContentPlanningTabs({
+  active,
+  onChange
+}: {
+  active: "concept" | "requirements" | "storyboard" | "figma" | "preview" | "feedback" | "versions";
+  onChange: (tab: "concept" | "requirements" | "storyboard" | "figma" | "preview" | "feedback" | "versions") => void;
+}) {
+  const tabs = [
+    ["concept", "Creative Concept"],
+    ["requirements", "Requirements Matrix"],
+    ["storyboard", "Storyboard"],
+    ["figma", "Figma Board"],
+    ["preview", "Plan Preview"],
+    ["feedback", "Leadership Feedback"],
+    ["versions", "Version History"]
+  ] as const;
+  return (
+    <div className="planTabs cpTabs">
+      {tabs.map(([id, label]) => <button className={active === id ? "active" : ""} key={id} onClick={() => onChange(id)}>{label}</button>)}
+    </div>
+  );
+}
+
+function ObjectApprovalStrip({ status, onUpdate }: { status: ContentPlanningApprovalStatus; onUpdate: (status: ContentPlanningApprovalStatus) => void }) {
+  return (
+    <div className="objectApprovalStrip">
+      <span className={`objectStatus ${status}`}>{status}</span>
+      <button onClick={() => onUpdate("approved")}><Check size={15} /> Approve object</button>
+      <button onClick={() => onUpdate("revision-requested")}>Request revision</button>
+    </div>
+  );
+}
+
+function CreativeConceptPanel({ packageData, onUpdate }: { packageData: ContentPlanningBridge["creativeConcept"]; onUpdate: (status: ContentPlanningApprovalStatus) => void }) {
+  return (
+    <section className="cpPackagePanel creativeConceptPanel">
+      <PackageHeader storyId={packageData.storyId} title={packageData.title} status={packageData.status} onUpdate={onUpdate} />
+      <div className="headHeartHands">
+        <article><small>Head</small><strong>Big idea</strong><p>{packageData.head}</p></article>
+        <article><small>Heart</small><strong>Look & feel</strong><p>{packageData.heart}</p></article>
+        <article><small>Hands</small><strong>In-situ proof</strong><p>{packageData.hands}</p></article>
+      </div>
+      <div className="cpTwoColumn">
+        <ChecklistBlock title="Proof points" items={packageData.proofPoints} />
+        <ChecklistBlock title="Visual directions" items={packageData.visualDirections} />
+      </div>
+    </section>
+  );
+}
+
+function StoryboardPanel({ packageData, onUpdate }: { packageData: ContentPlanningBridge["storyboard"]; onUpdate: (status: ContentPlanningApprovalStatus) => void }) {
+  return (
+    <section className="cpPackagePanel">
+      <PackageHeader storyId={packageData.storyId} title={packageData.title} status={packageData.status} onUpdate={onUpdate} />
+      <div className="storyboardGrid">
+        {packageData.frames.map((frame) => (
+          <article key={frame.id}>
+            <small>{frame.channel}</small>
+            <strong>{frame.scene}</strong>
+            <p>{frame.direction}</p>
+            <span>{frame.script}</span>
+          </article>
+        ))}
+      </div>
+      <div className="cpTwoColumn">
+        <ChecklistBlock title="Shotlist" items={packageData.shotlist} />
+        <ChecklistBlock title="Production plan" items={packageData.productionPlan} />
+      </div>
+    </section>
+  );
+}
+
+function FigmaBoardPanel({ packageData, onUpdate }: { packageData: ContentPlanningBridge["figmaBoard"]; onUpdate: (status: ContentPlanningApprovalStatus) => void }) {
+  return (
+    <section className="cpPackagePanel">
+      <PackageHeader storyId={packageData.storyId} title={packageData.title} status={packageData.status} onUpdate={onUpdate} />
+      <div className="figmaActionBar">
+        <button><Sparkles size={16} /> Create Figma Mapping</button>
+        <button className="secondary" onClick={() => window.open(packageData.figmaUrl, "_blank", "noopener,noreferrer")}>Open Figma</button>
+        <span>{packageData.mappingStatus}</span>
+      </div>
+      <div className="figmaBoardMock">
+        {packageData.frames.map((frame) => (
+          <article key={frame.id}>
+            <div className="figmaFramePreview">
+              {Array.from({ length: Math.max(1, Math.min(frame.placeholderCount, 5)) }).map((_, index) => <span key={index} />)}
+            </div>
+            <strong>{frame.name}</strong>
+            <small>{frame.ratio} · {frame.placeholderCount} placeholders</small>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PackageHeader({ storyId, title, status, onUpdate }: { storyId: string; title: string; status: ContentPlanningApprovalStatus; onUpdate: (status: ContentPlanningApprovalStatus) => void }) {
+  return (
+    <header className="cpPackageHeader">
+      <div>
+        <small>{storyId} object-level approval</small>
+        <h2>{title}</h2>
+      </div>
+      <ObjectApprovalStrip status={status} onUpdate={onUpdate} />
+    </header>
+  );
+}
+
+function ChecklistBlock({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="checklistBlock">
+      <h3>{title}</h3>
+      {items.map((item) => <span key={item}><Check size={14} /> {item}</span>)}
     </div>
   );
 }

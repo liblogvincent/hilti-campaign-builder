@@ -21,6 +21,8 @@ import {
   applyContentPlanningInstruction,
   buildLeadershipFeedbackProposal,
   buildPlanPreviewSlides,
+  buildContentPlanningBridge,
+  contentPlanningBridgeReadiness,
   simulatedPlanDeckFilename,
   currentPhaseMeta,
   defaultUserRole,
@@ -377,6 +379,7 @@ describe("panda run model", () => {
     expect(requirements.some((item) => item.channel === "Email" && item.assetType === "Hero section")).toBe(true);
     expect(requirements.some((item) => item.channel === "HOL Landing Page" && item.rolloutTarget === "Contentful")).toBe(true);
     expect(requirements.some((item) => item.locale === "fr-CH" && item.source === "Content Planning matrix")).toBe(true);
+    expect(requirements[0].title).toContain("SIW 6AT-A22");
     expect(requirements.every((item) => item.evidence.includes("H1 Campaign Plan"))).toBe(true);
   });
 
@@ -548,6 +551,40 @@ describe("panda run model", () => {
     expect(readiness.blocked).toBeGreaterThan(0);
     expect(readiness.channels).toContain("Paid Media");
     expect(readiness.pct).toBe(Math.round((2 / objects.length) * 100));
+  });
+
+  it("builds the RMB CP1-CP4 content planning bridge package", () => {
+    const plan = campaignPlanForRun(createDefaultRun());
+    const requirements = contentRequirementsFromPlan(plan);
+    const bridge = buildContentPlanningBridge(plan, requirements);
+
+    expect(bridge.creativeConcept.storyId).toBe("CP1");
+    expect(bridge.requirements.storyId).toBe("CP2");
+    expect(bridge.storyboard.storyId).toBe("CP3");
+    expect(bridge.figmaBoard.storyId).toBe("CP4");
+    expect(bridge.creativeConcept.head).toContain(plan.heroProduct);
+    expect(bridge.requirements.rows.length).toBe(requirements.length);
+    expect(bridge.storyboard.frames.length).toBeGreaterThan(0);
+    expect(bridge.figmaBoard.frames.length).toBeGreaterThan(0);
+    expect(bridge.figmaBoard.mappingStatus).toBe("ready-to-create");
+  });
+
+  it("requires CP1-CP4 object approval before final H2 approval", () => {
+    const bridge = buildContentPlanningBridge(campaignPlanForRun(createDefaultRun()), contentRequirementsFromPlan(campaignPlanForRun(createDefaultRun())));
+
+    expect(contentPlanningBridgeReadiness(bridge).readyForH2).toBe(false);
+    expect(contentPlanningBridgeReadiness(bridge).approved).toBe(0);
+
+    const approved = {
+      ...bridge,
+      creativeConcept: { ...bridge.creativeConcept, status: "approved" as const },
+      requirements: { ...bridge.requirements, status: "approved" as const },
+      storyboard: { ...bridge.storyboard, status: "approved" as const },
+      figmaBoard: { ...bridge.figmaBoard, status: "approved" as const }
+    };
+
+    expect(contentPlanningBridgeReadiness(approved).approved).toBe(4);
+    expect(contentPlanningBridgeReadiness(approved).readyForH2).toBe(true);
   });
 
   it("summarizes rollout readiness from lane-level publish objects", () => {

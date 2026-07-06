@@ -236,6 +236,61 @@ export type ContentRequirement = {
   rolloutTarget: CampaignPlanChannel["rolloutTarget"];
 };
 
+export type ContentPlanningApprovalStatus = "draft" | "in-review" | "approved" | "revision-requested";
+
+export type CreativeConceptPackage = {
+  storyId: "CP1";
+  title: string;
+  status: ContentPlanningApprovalStatus;
+  head: string;
+  heart: string;
+  hands: string;
+  proofPoints: string[];
+  visualDirections: string[];
+};
+
+export type CrossChannelRequirementsPackage = {
+  storyId: "CP2";
+  title: string;
+  status: ContentPlanningApprovalStatus;
+  rows: ContentRequirement[];
+  channels: string[];
+  productionNotes: string[];
+};
+
+export type StoryboardPackage = {
+  storyId: "CP3";
+  title: string;
+  status: ContentPlanningApprovalStatus;
+  frames: Array<{ id: string; scene: string; direction: string; channel: string; script: string }>;
+  shotlist: string[];
+  productionPlan: string[];
+};
+
+export type FigmaBoardManifest = {
+  storyId: "CP4";
+  title: string;
+  status: ContentPlanningApprovalStatus;
+  mappingStatus: "ready-to-create" | "created" | "needs-revision";
+  figmaUrl?: string;
+  frames: Array<{ id: string; name: string; channel: string; placeholderCount: number; ratio: string }>;
+  actions: string[];
+};
+
+export type ContentPlanningBridge = {
+  creativeConcept: CreativeConceptPackage;
+  requirements: CrossChannelRequirementsPackage;
+  storyboard: StoryboardPackage;
+  figmaBoard: FigmaBoardManifest;
+};
+
+export type ContentPlanningBridgeReadiness = {
+  approved: number;
+  total: 4;
+  readyForH2: boolean;
+  pending: string[];
+};
+
 export type RolloutWorkObject = {
   id: string;
   lane: "Paid Media" | "Contentful" | "Sprinklr" | "SFMC" | "UTM / QA" | "Publish Readiness";
@@ -1309,6 +1364,75 @@ export function applyContentPlanningInstruction(requirements: ContentRequirement
   ];
 }
 
+export function buildContentPlanningBridge(plan: CampaignPlan, requirements: ContentRequirement[]): ContentPlanningBridge {
+  const channels = Array.from(new Set(requirements.map((item) => item.channel)));
+  const hero = plan.heroProduct;
+  return {
+    creativeConcept: {
+      storyId: "CP1",
+      title: "Creative Concept",
+      status: "in-review",
+      head: `${hero} helps ${plan.audience[0] || "the target audience"} reduce friction with measurable jobsite confidence.`,
+      heart: "Confident, direct, proof-led Hilti red system energy with real jobsite texture rather than generic product glamour.",
+      hands: `Show ${hero} in use: fewer reworks, faster decisions, clear next step to HOL or sales contact.`,
+      proofPoints: ["Jobsite reliability", "Clear ROI argument", "Human-gated claims and compliance"],
+      visualDirections: ["Close-up product-in-use frame", "Before/after worksite proof", "Simple red CTA panel with one action"]
+    },
+    requirements: {
+      storyId: "CP2",
+      title: "Cross-Channel Requirements",
+      status: "in-review",
+      rows: requirements,
+      channels,
+      productionNotes: [
+        "One row per required asset, locale, owner, rollout target, and compliance evidence.",
+        "This matrix is the production scope baseline for Content Creation.",
+        "Changes here should create or update downstream Content work objects."
+      ]
+    },
+    storyboard: {
+      storyId: "CP3",
+      title: "Storyboard Package",
+      status: "draft",
+      frames: channels.slice(0, 6).map((channel, index) => ({
+        id: `story-${slug(channel)}-${index + 1}`,
+        scene: `${channel} opening moment`,
+        direction: index % 2 === 0 ? "Lead with product proof and a tight jobsite crop." : "Lead with audience pain point and a clear Hilti answer.",
+        channel,
+        script: `${hero}: prove the value, show the action, close with one CTA.`
+      })),
+      shotlist: ["Hero product close-up", "In-situ application", "Outcome proof frame", "CTA/end card"],
+      productionPlan: ["Confirm claims with Compliance", "Map visual idea to Figma placeholders", "Prepare static mockups for H2 review"]
+    },
+    figmaBoard: {
+      storyId: "CP4",
+      title: "Figma Board Mapping",
+      status: "draft",
+      mappingStatus: "ready-to-create",
+      figmaUrl: "https://figma.com/file/panda-cp4-placeholder",
+      frames: channels.map((channel) => ({
+        id: `figma-${slug(channel)}`,
+        name: `${channel} master placeholders`,
+        channel,
+        placeholderCount: requirements.filter((item) => item.channel === channel).length,
+        ratio: channel === "Paid Media" ? "1:1 / 4:5 / 16:9" : channel === "Email" ? "Email module" : "Responsive module"
+      })),
+      actions: ["Create Figma Mapping", "Open Figma", "Sync placeholders to Content"]
+    }
+  };
+}
+
+export function contentPlanningBridgeReadiness(bridge: ContentPlanningBridge): ContentPlanningBridgeReadiness {
+  const packages = [bridge.creativeConcept, bridge.requirements, bridge.storyboard, bridge.figmaBoard];
+  const approved = packages.filter((item) => item.status === "approved").length;
+  return {
+    approved,
+    total: 4,
+    readyForH2: approved === 4,
+    pending: packages.filter((item) => item.status !== "approved").map((item) => item.title)
+  };
+}
+
 export function buildPlanPreviewSlides(view: Extract<AppView, "campaign-planning" | "content-planning">, plan: CampaignPlan, requirements: ContentRequirement[]): PlanPreviewSlide[] {
   if (view === "content-planning") {
     return [
@@ -1817,7 +1941,10 @@ function slug(value: string) {
 }
 
 function titleCase(value: string) {
-  return value.replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+  return value.replace(/\w\S*/g, (word) => {
+    if (/[A-Z]{2,}|\d/.test(word)) return word;
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+  });
 }
 
 function sentenceCase(value: string) {

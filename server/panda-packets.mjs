@@ -228,11 +228,12 @@ function planningPacket(payload) {
 function contentPacket() {
   return phasePacket(
     "H2",
-    "Content package created with creative, requirements, copy, Figma mapping evidence, image prompts, and compliance evidence for H2 review.",
+    "Content Planning bridge package created for H2: CP1 Creative Concept, CP2 Cross-Channel Requirements, CP3 Storyboarding, and CP4 Figma Mapping evidence are ready for object-level approval.",
     [
       { agent: "cp1", status: "done", message: "Selected a torque-first creative concept with contractor proof points." },
       { agent: "cp2", status: "done", message: "Mapped Meta, LinkedIn, Google, email, HOL, social, and HN asset requirements." },
-      { agent: "cp4", status: "done", message: "Prepared a Figma board manifest instead of claiming a live Figma write." },
+      { agent: "cp3", status: "done", message: "Drafted storyboards, shot list, script beats, and production planning for key placements." },
+      { agent: "cp4", status: "done", message: "Prepared a Figma mapping manifest instead of claiming a live Figma write." },
       { agent: "c2", status: "done", message: "Attached compliance evidence to asset-level outputs." },
     ],
     [
@@ -245,16 +246,26 @@ function contentPacket() {
       ),
       artifact(
         "Cross-Channel Requirements",
-        "cp2-requirements",
+        "cp2-cross-channel-requirements",
         "Asset requirements cover paid media, HOL, email, social, and HN even where Panda only generates paid-media content today.",
         { channels: ["Meta", "LinkedIn", "Google", "HOL", "Email", "Organic/HN"] },
         meta("Excel", "Content Planning Lead", "mock", "source-of-truth", "H2", "Requirements sheet"),
       ),
       artifact(
-        "Figma Board Manifest",
-        "figma-board-manifest",
+        "Storyboard Package",
+        "cp3-storyboard-package",
+        "Storyboard frames and shot plan translate the creative concept into production-ready scenes before final copy and assets are built.",
+        {
+          frames: ["Opening proof point", "Problem demonstration", "Solution moment", "CTA / next step"],
+          productionPlan: ["Confirm claim evidence", "Assign channel owners", "Prepare static mockups for R-1"],
+        },
+        meta("PowerPoint / Figma", "Creative Producer", "mock", "source-of-truth", "H2", "Storyboard and production plan"),
+      ),
+      artifact(
+        "Figma Mapping",
+        "cp4-figma-mapping",
         "Mock Figma board with paid, HOL, email, social, and HN placeholders. MCP write not yet executed.",
-        { frames: ["Paid media", "HOL LP", "Email", "Organic/HN", "Localization"] },
+        { frames: ["Paid media", "HOL LP", "Email", "Organic/HN", "Localization"], action: "create-figma-mapping" },
         meta("Figma", "Designer / Content Operations", "mock", "source-of-truth", "H2", "Figma board manifest"),
       ),
       artifact(

@@ -3383,6 +3383,207 @@ footer {
   gap: 14px;
 }
 
+.cpTabs {
+  flex-wrap: wrap;
+}
+
+.cpReadiness {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border: 1px solid #f0c9c5;
+  border-left: 5px solid var(--hilti);
+  border-radius: 14px;
+  background: #fff8f7;
+}
+
+.cpReadiness.ready {
+  border-color: #cae6d4;
+  border-left-color: var(--bamboo);
+  background: #f6fff8;
+}
+
+.cpReadiness small,
+.cpPackageHeader small {
+  color: #777;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.cpReadiness strong {
+  display: block;
+  margin: 3px 0;
+  font-family: PandaDisplay, sans-serif;
+  font-size: 24px;
+}
+
+.cpReadiness p {
+  margin: 0;
+  color: #4d4f53;
+}
+
+.cpReadiness button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.cpPackagePanel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.cpPackageHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #eee8df;
+}
+
+.cpPackageHeader h2 {
+  margin: 4px 0 0;
+  font-family: PandaDisplay, sans-serif;
+  font-size: clamp(28px, 3vw, 44px);
+  line-height: 1;
+}
+
+.objectApprovalStrip {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.objectApprovalStrip button {
+  min-height: 34px;
+  padding: 0 11px;
+  border-radius: 10px;
+}
+
+.headHeartHands {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.headHeartHands article,
+.storyboardGrid article,
+.figmaBoardMock article,
+.checklistBlock {
+  padding: 14px;
+  border: 1px solid #e7e1d7;
+  border-radius: 12px;
+  background: #fffdf8;
+}
+
+.headHeartHands small,
+.storyboardGrid small,
+.figmaBoardMock small {
+  color: #8b5d55;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.headHeartHands strong,
+.storyboardGrid strong,
+.figmaBoardMock strong {
+  display: block;
+  margin: 4px 0 8px;
+}
+
+.headHeartHands p,
+.storyboardGrid p {
+  margin: 0;
+  color: #3f4547;
+  line-height: 1.45;
+}
+
+.cpTwoColumn {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.checklistBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.checklistBlock h3 {
+  margin: 0;
+}
+
+.checklistBlock span {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #3f4547;
+}
+
+.storyboardGrid,
+.figmaBoardMock {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.storyboardGrid span {
+  display: block;
+  margin-top: 9px;
+  color: #666b73;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.figmaActionBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.figmaActionBar span {
+  padding: 8px 10px;
+  border: 1px solid #e7e1d7;
+  border-radius: 999px;
+  background: #fffdf8;
+  color: #6b514b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.figmaFramePreview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 118px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid #ddd5ca;
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, rgba(210, 5, 30, 0.08) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(210, 5, 30, 0.08) 1px, transparent 1px),
+    #fff;
+  background-size: 20px 20px;
+}
+
+.figmaFramePreview span {
+  min-height: 28px;
+  border: 1px dashed #d2051e;
+  border-radius: 8px;
+  background: rgba(210, 5, 30, 0.05);
+}
+
 .handoffSourcePanel {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
