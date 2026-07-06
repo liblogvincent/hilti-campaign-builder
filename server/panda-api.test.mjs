@@ -453,20 +453,39 @@ describe("panda api handlers", () => {
 
   it("persists a human gate decision through the durable runtime handler", async () => {
     const client = createFakeSupabaseClient({
-      campaigns: {
-        select: [
+      rpc: {
+        persist_gate_decision: [
           {
             data: {
-              id: "camp_04",
-              name: "Fixture Campaign",
-              brief: "Plan a campaign",
-              phase: "content",
-              active_gate: "H2",
-              owner_role: "Campaign Owner",
-              updated_at: "2026-07-06T00:00:00.000Z",
+              gate_decision: {
+                id: 91,
+                campaign_id: "camp_04",
+                gate: "H2",
+                decision: "approved",
+                reviewer: "Vincent",
+                comment: "Ready for rollout.",
+              },
+              campaign: {
+                id: "camp_04",
+                phase: "rollout",
+                active_gate: "H3",
+              },
+              runtime_event: {
+                id: "gate_decision_01",
+                campaign_id: "camp_04",
+                workspace: "gates",
+                type: "gate_decision",
+                actor: "Vincent",
+                payload: { gateId: "H2", decision: "approved", comment: "Ready for rollout." },
+                created_at: "2026-07-06T00:00:05.000Z",
+              },
             },
             error: null,
           },
+        ],
+      },
+      campaigns: {
+        select: [
           {
             data: {
               id: "camp_04",
@@ -480,7 +499,6 @@ describe("panda api handlers", () => {
             error: null,
           },
         ],
-        update: [{ data: null, error: null }],
       },
       campaign_plans: {
         select: [{ data: [], error: null }],
@@ -492,7 +510,6 @@ describe("panda api handlers", () => {
         select: [{ data: [], error: null }],
       },
       gate_decisions: {
-        insert: [{ data: null, error: null }],
         select: [
           {
             data: [
@@ -511,7 +528,6 @@ describe("panda api handlers", () => {
         ],
       },
       runtime_events: {
-        insert: [{ data: null, error: null }],
         select: [
           {
             data: [
@@ -565,22 +581,14 @@ describe("panda api handlers", () => {
     expect(client.operations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          table: "gate_decisions",
-          op: "insert",
-          payload: expect.objectContaining({
-            campaign_id: "camp_04",
-            gate: "H2",
-            decision: "approved",
-            reviewer: "Vincent",
-            comment: "Ready for rollout.",
-          }),
-        }),
-        expect.objectContaining({
-          table: "campaigns",
-          op: "update",
-          payload: expect.objectContaining({
-            phase: "rollout",
-            active_gate: "H3",
+          kind: "rpc",
+          fn: "persist_gate_decision",
+          args: expect.objectContaining({
+            p_campaign_id: "camp_04",
+            p_gate: "H2",
+            p_decision: "approved",
+            p_reviewer: "Vincent",
+            p_comment: "Ready for rollout.",
           }),
         }),
       ]),

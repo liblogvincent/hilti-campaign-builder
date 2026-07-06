@@ -537,15 +537,36 @@ describe("runtime action executor", () => {
   it("persists gate decisions and advances the campaign phase in Supabase mode", async () => {
     const run = createDefaultRun({ phase: "content" });
     const client = createFakeSupabaseClient({
-      campaigns: {
-        select: [{ data: { id: run.campaignId, name: run.name, brief: run.brief, phase: "content", active_gate: "H2", owner_role: "Campaign Owner" }, error: null }],
-        update: [{ data: null, error: null }],
-      },
-      gate_decisions: {
-        insert: [{ data: null, error: null }],
-      },
-      runtime_events: {
-        insert: [{ data: null, error: null }],
+      rpc: {
+        persist_gate_decision: [
+          {
+            data: {
+              gate_decision: {
+                id: 20,
+                campaign_id: run.campaignId,
+                gate: "H2",
+                decision: "approved",
+                reviewer: "Vincent",
+                comment: "Ready for rollout.",
+              },
+              campaign: {
+                id: run.campaignId,
+                phase: "rollout",
+                active_gate: "H3",
+              },
+              runtime_event: {
+                id: "gate_decision_01",
+                campaign_id: run.campaignId,
+                workspace: "gates",
+                type: "gate_decision",
+                actor: "Vincent",
+                payload: { gateId: "H2", decision: "approved", campaign_phase: "rollout" },
+                created_at: "2026-07-06T00:00:00.000Z",
+              },
+            },
+            error: null,
+          },
+        ],
       },
     });
 
@@ -569,29 +590,54 @@ describe("runtime action executor", () => {
 
     expect(result.events).toHaveLength(1);
     expect(result.events[0].type).toBe("gate_decision");
-    expect(client.operations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          table: "gate_decisions",
-          op: "insert",
-          payload: expect.objectContaining({
-            campaign_id: run.campaignId,
-            gate: "H2",
+    expect(result.events[0]).toMatchObject({ id: "gate_decision_01", campaignId: run.campaignId });
+    expect(client.operations).toEqual([
+      expect.objectContaining({
+        kind: "rpc",
+        fn: "persist_gate_decision",
+        args: expect.objectContaining({
+          p_campaign_id: run.campaignId,
+          p_gate: "H2",
+          p_decision: "approved",
+          p_reviewer: "Vincent",
+          p_comment: "Ready for rollout.",
+        }),
+      }),
+    ]);
+  });
+
+  it("surfaces gate decision RPC failures without partial Supabase writes", async () => {
+    const run = createDefaultRun({ phase: "content" });
+    const client = createFakeSupabaseClient({
+      rpc: {
+        persist_gate_decision: [{ data: null, error: new Error("gate rpc failed") }],
+      },
+    });
+
+    await expect(
+      executeRuntimeAction({
+        action: {
+          action: "create_gate_decision",
+          payload: {
+            gateId: "H2",
             decision: "approved",
             reviewer: "Vincent",
             comment: "Ready for rollout.",
-          }),
-        }),
-        expect.objectContaining({
-          table: "campaigns",
-          op: "update",
-          payload: expect.objectContaining({
-            phase: "rollout",
-            active_gate: "H3",
-          }),
-        }),
-      ]),
-    );
+          },
+        },
+        campaignId: run.campaignId,
+        workspace: "content",
+        actor: "Vincent",
+        supabase: client.client,
+      }),
+    ).rejects.toThrow("gate rpc failed");
+
+    expect(client.operations).toEqual([
+      expect.objectContaining({
+        kind: "rpc",
+        fn: "persist_gate_decision",
+      }),
+    ]);
   });
 });
 

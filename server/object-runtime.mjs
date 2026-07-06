@@ -445,45 +445,25 @@ async function executeSupabaseAction({ action, campaignId, workspace, actor, sup
 
   if (action.action === "create_gate_decision") {
     const details = normalizeGateDecisionAction(action, actor);
-    const { data: campaign, error: campaignError } = await supabase
-      .from("campaigns")
-      .select("*")
-      .eq("id", campaignId)
-      .single();
-    if (campaignError) throw campaignError;
-
-    const { error: decisionError } = await supabase.from("gate_decisions").insert({
-      campaign_id: campaignId,
-      gate: details.gateId,
-      decision: details.runtimeDecision,
-      reviewer: details.reviewer,
-      owner_id: null,
-      comment: details.comment,
-      created_at: details.timestamp,
+    const { data, error } = await supabase.rpc("persist_gate_decision", {
+      p_campaign_id: campaignId,
+      p_gate: details.gateId,
+      p_decision: details.runtimeDecision,
+      p_reviewer: details.reviewer,
+      p_comment: details.comment,
+      p_owner_id: null,
     });
-    if (decisionError) throw decisionError;
+    if (error) throw error;
 
-    if (details.runtimeDecision === "approved") {
-      const nextPhase = nextRuntimePhaseState(campaign.phase);
-      const { error: updateError } = await supabase
-        .from("campaigns")
-        .update({
-          phase: nextPhase.phase,
-          active_gate: nextPhase.activeGate,
-          updated_at: details.timestamp,
-        })
-        .eq("id", campaignId);
-      if (updateError) throw updateError;
-    }
-
-    const event = createGateDecisionEvent({
-      campaignId,
-      gateId: details.gateId,
-      decision: details.runtimeDecision,
-      reviewer: details.reviewer,
-      comment: details.comment,
-    });
-    await persistRuntimeEventOnly({ supabase, event });
+    const event =
+      mapRuntimeEventRow(data?.runtime_event) ??
+      createGateDecisionEvent({
+        campaignId,
+        gateId: details.gateId,
+        decision: details.runtimeDecision,
+        reviewer: details.reviewer,
+        comment: details.comment,
+      });
     return { snapshot: undefined, revisions: [], events: [event] };
   }
 
@@ -543,6 +523,19 @@ async function persistRuntimeEventOnly({ supabase, event }) {
     created_at: event.timestamp,
   });
   if (error) throw error;
+}
+
+function mapRuntimeEventRow(row) {
+  if (!isPlainObject(row)) return undefined;
+  return {
+    id: stringValue(row.id) || `runtime_event_${Date.now()}`,
+    campaignId: stringValue(row.campaign_id) || stringValue(row.campaignId) || "unknown-campaign",
+    workspace: stringValue(row.workspace) || "global",
+    type: stringValue(row.type) || "audit",
+    actor: stringValue(row.actor) || "panda-runtime",
+    payload: isPlainObject(row.payload) ? row.payload : {},
+    timestamp: stringValue(row.created_at) || stringValue(row.createdAt) || new Date().toISOString(),
+  };
 }
 
 function patchCampaignPlan(before, payload) {

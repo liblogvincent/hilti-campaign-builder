@@ -353,3 +353,144 @@ revoke execute on function public.persist_agent_turn(text, text, text, text, tex
 revoke execute on function public.persist_agent_turn(text, text, text, text, text, text, uuid) from authenticated;
 grant execute on function public.persist_agent_turn(text, text, text, text, text, text, uuid) to service_role;
 alter function public.persist_agent_turn(text, text, text, text, text, text, uuid) owner to postgres;
+
+create or replace function public.persist_gate_decision(
+  p_campaign_id text,
+  p_gate text,
+  p_decision text,
+  p_reviewer text,
+  p_comment text default '',
+  p_owner_id uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_campaign public.campaigns%rowtype;
+  v_gate_decision public.gate_decisions%rowtype;
+  v_existing_decision public.gate_decisions%rowtype;
+  v_runtime_event public.runtime_events%rowtype;
+  v_next_phase text;
+  v_next_gate text;
+begin
+  if coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role'
+     and current_user not in ('postgres', 'supabase_admin') then
+    raise exception 'persist_gate_decision is restricted to service-role runtime calls';
+  end if;
+
+  if p_gate not in ('H1','H2','H3','H4','H-C','H-legal') then
+    raise exception 'Unsupported gate: %', p_gate;
+  end if;
+
+  if p_decision not in ('approved','revision-requested','blocked') then
+    raise exception 'Unsupported gate decision: %', p_decision;
+  end if;
+
+  select *
+    into v_campaign
+    from public.campaigns
+   where id = p_campaign_id
+   for update;
+
+  if not found then
+    raise exception 'Campaign % not found', p_campaign_id;
+  end if;
+
+  select *
+    into v_existing_decision
+    from public.gate_decisions
+   where campaign_id = p_campaign_id
+     and gate = p_gate
+     and decision = p_decision
+   order by created_at desc
+   limit 1;
+
+  if v_existing_decision.id is not null then
+    v_gate_decision := v_existing_decision;
+  else
+    insert into public.gate_decisions (
+      campaign_id,
+      gate,
+      decision,
+      reviewer,
+      owner_id,
+      comment
+    )
+    values (
+      p_campaign_id,
+      p_gate,
+      p_decision,
+      p_reviewer,
+      p_owner_id,
+      coalesce(p_comment, '')
+    )
+    returning * into v_gate_decision;
+  end if;
+
+  if p_decision = 'approved' and v_campaign.active_gate = p_gate then
+    if v_campaign.phase = 'planning' then
+      v_next_phase := 'content';
+      v_next_gate := 'H2';
+    elsif v_campaign.phase = 'content' then
+      v_next_phase := 'rollout';
+      v_next_gate := 'H3';
+    elsif v_campaign.phase = 'rollout' then
+      v_next_phase := 'optimize';
+      v_next_gate := 'H4';
+    else
+      v_next_phase := v_campaign.phase;
+      v_next_gate := v_campaign.active_gate;
+    end if;
+
+    update public.campaigns
+       set phase = v_next_phase,
+           active_gate = v_next_gate,
+           updated_at = now()
+     where id = p_campaign_id
+     returning * into v_campaign;
+  end if;
+
+  insert into public.runtime_events (
+    id,
+    campaign_id,
+    workspace,
+    type,
+    actor,
+    owner_id,
+    payload
+  )
+  values (
+    concat('gate_decision_', gen_random_uuid()::text),
+    p_campaign_id,
+    'gates',
+    'gate_decision',
+    p_reviewer,
+    p_owner_id,
+    jsonb_build_object(
+      'campaign_id', p_campaign_id,
+      'gateId', p_gate,
+      'decision', p_decision,
+      'reviewer', p_reviewer,
+      'comment', coalesce(p_comment, ''),
+      'gate_decision_id', v_gate_decision.id,
+      'campaign_phase', v_campaign.phase,
+      'active_gate', v_campaign.active_gate
+    )
+  )
+  returning * into v_runtime_event;
+
+  return jsonb_build_object(
+    'gate_decision', to_jsonb(v_gate_decision),
+    'campaign', to_jsonb(v_campaign),
+    'runtime_event', to_jsonb(v_runtime_event)
+  );
+end;
+$$;
+
+revoke execute on function public.persist_gate_decision(text, text, text, text, text, uuid) from public;
+revoke execute on function public.persist_gate_decision(text, text, text, text, text, uuid) from anon;
+revoke execute on function public.persist_gate_decision(text, text, text, text, text, uuid) from authenticated;
+grant execute on function public.persist_gate_decision(text, text, text, text, text, uuid) to service_role;
+alter function public.persist_gate_decision(text, text, text, text, text, uuid) owner to postgres;
