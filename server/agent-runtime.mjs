@@ -1,5 +1,3 @@
-import { createAgentMessageEvent } from "./runtime-events.mjs";
-
 export function fixtureThreadKey({ campaignId, workspace, agentId }) {
   return `${normalizeKeyPart(campaignId)}:${normalizeKeyPart(workspace)}:${normalizeKeyPart(agentId)}`;
 }
@@ -69,33 +67,21 @@ export async function persistRuntimeEvent({ event, supabase }) {
 }
 
 export async function persistAgentTurn({ campaignId, workspace, agentId, userText, answerText, modelMode = "unknown", supabase }) {
-  const threadId = await ensureThreadId({ campaignId, workspace, agentId, supabase });
-  const userMessage = await insertAgentMessage({
-    supabase,
-    threadId,
-    role: "user",
-    text: userText,
-    modelMode: "user",
-  });
+  if (!supabase || typeof supabase.rpc !== "function") {
+    throw new Error("Supabase RPC client is required for atomic agent turn persistence");
+  }
 
-  const agentMessage = await insertAgentMessage({
-    supabase,
-    threadId,
-    role: "agent",
-    text: answerText,
-    modelMode,
+  const { data, error } = await supabase.rpc("persist_agent_turn", {
+    p_campaign_id: campaignId,
+    p_workspace: workspace,
+    p_agent_id: agentId,
+    p_user_text: userText,
+    p_answer_text: answerText,
+    p_model_mode: modelMode,
   });
+  if (error) throw error;
 
-  const event = createAgentMessageEvent({
-    campaignId,
-    workspace,
-    role: "agent",
-    text: answerText,
-    actor: agentId,
-  });
-  await persistRuntimeEvent({ event, supabase });
-
-  return { userMessage, agentMessage, event };
+  return data ?? {};
 }
 
 async function ensureThreadId({ campaignId, workspace, agentId, supabase }) {

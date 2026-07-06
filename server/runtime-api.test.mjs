@@ -8,6 +8,7 @@ import {
   appendAgentMessageToFixture,
   loadAgentHistory,
   loadAgentHistoryFromFixture,
+  persistAgentTurn,
   persistRuntimeEvent,
 } from "./agent-runtime.mjs";
 import { createDefaultRun, campaignPlanForRun, campaignPlanningObjectsFromPlan, contentRequirementsFromPlan } from "../src/lib/panda.ts";
@@ -669,15 +670,149 @@ describe("agent runtime messages", () => {
       }),
     ]);
   });
+
+  it("persists a full agent turn atomically through the RPC", async () => {
+    const client = createFakeSupabaseClient({
+      rpc: {
+        persist_agent_turn: [
+          {
+            data: {
+              thread_id: 41,
+              user_message_id: 100,
+              agent_message_id: 101,
+              runtime_event_id: "agent_message_01",
+              thread: {
+                id: 41,
+                campaign_id: "camp_04",
+                workspace: "campaign-planning",
+                agent_id: "campaign-planning-specialist",
+              },
+              user_message: {
+                id: 100,
+                thread_id: 41,
+                role: "user",
+                text: "update markets",
+                model_mode: "user",
+              },
+              agent_message: {
+                id: 101,
+                thread_id: 41,
+                role: "agent",
+                text: "campaigns updated",
+                model_mode: "deepseek",
+              },
+              runtime_event: {
+                id: "agent_message_01",
+                campaign_id: "camp_04",
+                workspace: "campaign-planning",
+                type: "agent_message",
+                actor: "campaign-planning-specialist",
+                payload: {
+                  text: "campaigns updated",
+                },
+              },
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+
+    const turn = await persistAgentTurn({
+      campaignId: "camp_04",
+      workspace: "campaign-planning",
+      agentId: "campaign-planning-specialist",
+      userText: "update markets",
+      answerText: "campaigns updated",
+      modelMode: "deepseek",
+      supabase: client.client,
+    });
+
+    expect(turn).toMatchObject({
+      thread_id: 41,
+      user_message_id: 100,
+      agent_message_id: 101,
+      runtime_event_id: "agent_message_01",
+    });
+    expect(client.operations).toEqual([
+      expect.objectContaining({
+        kind: "rpc",
+        fn: "persist_agent_turn",
+        args: {
+          p_campaign_id: "camp_04",
+          p_workspace: "campaign-planning",
+          p_agent_id: "campaign-planning-specialist",
+          p_user_text: "update markets",
+          p_answer_text: "campaigns updated",
+          p_model_mode: "deepseek",
+        },
+      }),
+    ]);
+  });
+
+  it("surfaces RPC failures without any partial Supabase writes", async () => {
+    const client = createFakeSupabaseClient({
+      rpc: {
+        persist_agent_turn: [
+          {
+            data: null,
+            error: new Error("rpc write failed"),
+          },
+        ],
+      },
+    });
+
+    await expect(
+      persistAgentTurn({
+        campaignId: "camp_04",
+        workspace: "campaign-planning",
+        agentId: "campaign-planning-specialist",
+        userText: "update markets",
+        answerText: "campaigns updated",
+        modelMode: "deepseek",
+        supabase: client.client,
+      }),
+    ).rejects.toThrow("rpc write failed");
+    expect(client.operations).toEqual([
+      expect.objectContaining({
+        kind: "rpc",
+        fn: "persist_agent_turn",
+      }),
+    ]);
+  });
 });
 
 function createFakeSupabaseClient(scripts = {}) {
   const operations = [];
-  const tables = new Map(Object.entries(scripts));
+  const tables = new Map();
+  const rpcs = new Map();
+
+  for (const [key, value] of Object.entries(scripts)) {
+    if (key === "rpc") {
+      for (const [fn, queue] of Object.entries(value || {})) {
+        rpcs.set(fn, Array.isArray(queue) ? [...queue] : [queue]);
+      }
+      continue;
+    }
+
+    tables.set(key, value);
+  }
 
   const client = {
     from(table) {
       return createFakeQueryBuilder({ table, operations, scripts: tables });
+    },
+    rpc(fn, args) {
+      operations.push({
+        kind: "rpc",
+        fn,
+        args: cloneValue(args),
+      });
+
+      const queue = rpcs.get(fn) || [];
+      const next = queue.length ? queue.shift() : { data: null, error: null };
+      rpcs.set(fn, queue);
+      return Promise.resolve(next);
     },
   };
 

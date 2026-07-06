@@ -309,42 +309,21 @@ describe("panda api handlers", () => {
 
   it("persists a phase packet turn when Supabase runtime is enabled", async () => {
     const client = createFakeSupabaseClient({
-      agent_threads: {
-        upsert: [
-          {
-            data: { id: 41, campaign_id: "camp_04", workspace: "campaign-planning", agent_id: "home-orchestrator" },
-            error: null,
-          },
-        ],
-      },
-      agent_messages: {
-        insert: [
+      rpc: {
+        persist_agent_turn: [
           {
             data: {
-              id: 100,
               thread_id: 41,
-              role: "user",
-              text: "Create the next gate-ready artifact packet.",
-              model_mode: "user",
-            },
-            error: null,
-          },
-          {
-            data: {
-              id: 101,
-              thread_id: 41,
-              role: "agent",
-              text: "H1 packet is ready.",
-              model_mode: "fixture",
+              user_message_id: 100,
+              agent_message_id: 101,
+              runtime_event_id: "agent_message_01",
             },
             error: null,
           },
         ],
-      },
-      runtime_events: {
-        insert: [{ data: null, error: null }],
       },
     });
+    createClientMock.mockReset();
     createClientMock.mockReturnValue(client.client);
 
     const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
@@ -362,52 +341,20 @@ describe("panda api handlers", () => {
     expect(res.status).toBe(200);
     expect(body.mode).toBe("fixture");
     expect(body.summary).toBeTruthy();
-    expect(client.operations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          table: "agent_threads",
-          op: "upsert",
-          payload: expect.objectContaining({
-            campaign_id: "camp_04",
-            workspace: "campaign-planning",
-            agent_id: "home-orchestrator",
-          }),
-        }),
-        expect.objectContaining({
-          table: "agent_messages",
-          op: "insert",
-          payload: expect.objectContaining({
-            thread_id: 41,
-            role: "user",
-            text: "Create the next gate-ready artifact packet.",
-            model_mode: "user",
-          }),
-        }),
-        expect.objectContaining({
-          table: "agent_messages",
-          op: "insert",
-          payload: expect.objectContaining({
-            thread_id: 41,
-            role: "agent",
-            text: body.summary,
-            model_mode: "fixture",
-          }),
-        }),
-        expect.objectContaining({
-          table: "runtime_events",
-          op: "insert",
-          payload: expect.objectContaining({
-            campaign_id: "camp_04",
-            workspace: "campaign-planning",
-            type: "agent_message",
-            actor: "home-orchestrator",
-            payload: expect.objectContaining({
-              text: body.summary,
-            }),
-          }),
-        }),
-      ]),
-    );
+    expect(client.operations).toEqual([
+      expect.objectContaining({
+        kind: "rpc",
+        fn: "persist_agent_turn",
+        args: {
+          p_campaign_id: "camp_04",
+          p_workspace: "campaign-planning",
+          p_agent_id: "home-orchestrator",
+          p_user_text: "Create the next gate-ready artifact packet.",
+          p_answer_text: body.summary,
+          p_model_mode: "fixture",
+        },
+      }),
+    ]);
 
     restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
     restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
@@ -416,42 +363,21 @@ describe("panda api handlers", () => {
 
   it("persists a scoped orchestrator turn when Supabase runtime is enabled", async () => {
     const client = createFakeSupabaseClient({
-      agent_threads: {
-        upsert: [
-          {
-            data: { id: 51, campaign_id: "camp_04", workspace: "campaign-planning", agent_id: "campaign-planning-specialist" },
-            error: null,
-          },
-        ],
-      },
-      agent_messages: {
-        insert: [
+      rpc: {
+        persist_agent_turn: [
           {
             data: {
-              id: 201,
               thread_id: 51,
-              role: "user",
-              text: "What is missing before H2?",
-              model_mode: "user",
-            },
-            error: null,
-          },
-          {
-            data: {
-              id: 202,
-              thread_id: 51,
-              role: "agent",
-              text: "H2 is not ready yet.",
-              model_mode: "fixture",
+              user_message_id: 201,
+              agent_message_id: 202,
+              runtime_event_id: "agent_message_02",
             },
             error: null,
           },
         ],
-      },
-      runtime_events: {
-        insert: [{ data: null, error: null }],
       },
     });
+    createClientMock.mockReset();
     createClientMock.mockReturnValue(client.client);
 
     const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
@@ -476,52 +402,113 @@ describe("panda api handlers", () => {
     expect(res.status).toBe(200);
     expect(body.mode).toBe("fixture");
     expect(body.answer).toBeTruthy();
-    expect(client.operations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          table: "agent_threads",
-          op: "upsert",
-          payload: expect.objectContaining({
-            campaign_id: "camp_04",
-            workspace: "campaign-planning",
-            agent_id: "campaign-planning-specialist",
-          }),
-        }),
-        expect.objectContaining({
-          table: "agent_messages",
-          op: "insert",
-          payload: expect.objectContaining({
-            thread_id: 51,
-            role: "user",
-            text: "What is missing before H2?",
-            model_mode: "user",
-          }),
-        }),
-        expect.objectContaining({
-          table: "agent_messages",
-          op: "insert",
-          payload: expect.objectContaining({
-            thread_id: 51,
-            role: "agent",
-            text: body.answer,
-            model_mode: "fixture",
-          }),
-        }),
-        expect.objectContaining({
-          table: "runtime_events",
-          op: "insert",
-          payload: expect.objectContaining({
-            campaign_id: "camp_04",
-            workspace: "campaign-planning",
-            type: "agent_message",
-            actor: "campaign-planning-specialist",
-            payload: expect.objectContaining({
-              text: body.answer,
-            }),
-          }),
-        }),
-      ]),
+    expect(client.operations).toEqual([
+      expect.objectContaining({
+        kind: "rpc",
+        fn: "persist_agent_turn",
+        args: {
+          p_campaign_id: "camp_04",
+          p_workspace: "campaign-planning",
+          p_agent_id: "campaign-planning-specialist",
+          p_user_text: "What is missing before H2?",
+          p_answer_text: body.answer,
+          p_model_mode: "fixture",
+        },
+      }),
+    ]);
+
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+  });
+
+  it("returns a persistence failure when Supabase RPC fails for agent turns", async () => {
+    const client = createFakeSupabaseClient({
+      rpc: {
+        persist_agent_turn: [
+          {
+            data: null,
+            error: new Error("rpc write failed"),
+          },
+        ],
+      },
+    });
+    createClientMock.mockReset();
+    createClientMock.mockReturnValue(client.client);
+
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.PANDA_RUNTIME_MODE = "supabase";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    delete process.env.DEEPSEEK_API_KEY;
+
+    const res = createResponse();
+    await handleAgent(createRequest("POST", { phase: "planning", campaign_id: "camp_04", instruction: "Create the next gate-ready artifact packet." }), res);
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(503);
+    expect(body).toEqual({
+      error: "Durable runtime persistence failed",
+      details: "rpc write failed",
+    });
+    expect(client.operations).toEqual([
+      expect.objectContaining({
+        kind: "rpc",
+        fn: "persist_agent_turn",
+      }),
+    ]);
+
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+  });
+
+  it("returns a persistence failure when Supabase RPC fails for orchestrator turns", async () => {
+    const client = createFakeSupabaseClient({
+      rpc: {
+        persist_agent_turn: [
+          {
+            data: null,
+            error: new Error("rpc write failed"),
+          },
+        ],
+      },
+    });
+    createClientMock.mockReset();
+    createClientMock.mockReturnValue(client.client);
+
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.PANDA_RUNTIME_MODE = "supabase";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    delete process.env.DEEPSEEK_API_KEY;
+
+    const res = createResponse();
+    await handleOrchestrator(
+      createRequest("POST", {
+        campaign_id: "camp_04",
+        question: "What is missing before H2?",
+        agent_scope: { id: "campaign-planning-specialist", view: "campaign-planning" },
+      }),
+      res,
     );
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(503);
+    expect(body).toEqual({
+      error: "Durable runtime persistence failed",
+      details: "rpc write failed",
+    });
+    expect(client.operations).toEqual([
+      expect.objectContaining({
+        kind: "rpc",
+        fn: "persist_agent_turn",
+      }),
+    ]);
 
     restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
     restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
@@ -763,11 +750,35 @@ function restoreEnvKey(name, value) {
 
 function createFakeSupabaseClient(scripts = {}) {
   const operations = [];
-  const tables = new Map(Object.entries(scripts));
+  const tables = new Map();
+  const rpcs = new Map();
+
+  for (const [key, value] of Object.entries(scripts)) {
+    if (key === "rpc") {
+      for (const [fn, queue] of Object.entries(value || {})) {
+        rpcs.set(fn, Array.isArray(queue) ? [...queue] : [queue]);
+      }
+      continue;
+    }
+
+    tables.set(key, value);
+  }
 
   const client = {
     from(table) {
       return createFakeQueryBuilder({ table, operations, scripts: tables });
+    },
+    rpc(fn, args) {
+      operations.push({
+        kind: "rpc",
+        fn,
+        args: cloneValue(args),
+      });
+
+      const queue = rpcs.get(fn) || [];
+      const next = queue.length ? queue.shift() : { data: null, error: null };
+      rpcs.set(fn, queue);
+      return Promise.resolve(next);
     },
   };
 

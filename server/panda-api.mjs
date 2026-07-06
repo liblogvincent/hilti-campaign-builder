@@ -74,7 +74,7 @@ export async function handleAgent(req, res) {
     result = { mode: "fixture", warning: error instanceof Error ? error.message : "Agent call failed", ...fallback };
   }
 
-  const persistedResult = await persistTurnIfConfigured({
+  const persistence = await persistTurnIfConfigured({
     supabase,
     campaignId,
     workspace,
@@ -83,8 +83,9 @@ export async function handleAgent(req, res) {
     answerText: responseSummary(result, fallback),
     result,
   });
+  if (!persistence.ok) return sendJson(res, persistence.status, persistence.body);
 
-  return sendJson(res, 200, persistedResult);
+  return sendJson(res, 200, result);
 }
 
 export async function handleOrchestrator(req, res) {
@@ -111,7 +112,7 @@ export async function handleOrchestrator(req, res) {
     result = { mode: "fixture", warning: error instanceof Error ? error.message : "Orchestrator call failed", ...fallback };
   }
 
-  const persistedResult = await persistTurnIfConfigured({
+  const persistence = await persistTurnIfConfigured({
     supabase,
     campaignId,
     workspace,
@@ -120,8 +121,9 @@ export async function handleOrchestrator(req, res) {
     answerText: responseAnswer(result, fallback),
     result,
   });
+  if (!persistence.ok) return sendJson(res, persistence.status, persistence.body);
 
-  return sendJson(res, 200, persistedResult);
+  return sendJson(res, 200, result);
 }
 
 export async function handleIntegrationStatus(_req, res) {
@@ -313,7 +315,7 @@ function readBody(req) {
 }
 
 async function persistTurnIfConfigured({ supabase, campaignId, workspace, agentId, userText, answerText, result }) {
-  if (!supabase) return result;
+  if (!supabase) return { ok: true };
 
   try {
     await persistAgentTurn({
@@ -325,11 +327,12 @@ async function persistTurnIfConfigured({ supabase, campaignId, workspace, agentI
       modelMode: typeof result.mode === "string" ? result.mode : "unknown",
       supabase,
     });
-    return result;
+    return { ok: true };
   } catch (error) {
     return {
-      ...result,
-      warning: joinWarnings(result.warning, error instanceof Error ? error.message : "Durable runtime persistence failed"),
+      ok: false,
+      status: 503,
+      body: buildPersistenceFailureBody(result, error),
     };
   }
 }
@@ -382,8 +385,11 @@ function responseAnswer(result, fallback) {
   return typeof fallback.answer === "string" ? fallback.answer : "Panda is ready.";
 }
 
-function joinWarnings(existingWarning, nextWarning) {
-  if (!existingWarning) return nextWarning;
-  if (!nextWarning) return existingWarning;
-  return `${existingWarning}\n\n${nextWarning}`;
+function buildPersistenceFailureBody(result, error) {
+  const details = error instanceof Error ? error.message : "Durable runtime persistence failed";
+  return {
+    error: "Durable runtime persistence failed",
+    details,
+    ...(typeof result.warning === "string" && result.warning.trim() ? { warning: result.warning } : {}),
+  };
 }

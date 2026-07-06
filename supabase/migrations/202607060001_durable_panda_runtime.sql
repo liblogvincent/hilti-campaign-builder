@@ -190,3 +190,117 @@ values (
   'Campaign Owner'
 )
 on conflict (id) do nothing;
+
+create or replace function public.persist_agent_turn(
+  p_campaign_id text,
+  p_workspace text,
+  p_agent_id text,
+  p_user_text text,
+  p_answer_text text,
+  p_model_mode text default 'unknown',
+  p_owner_id uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_thread public.agent_threads%rowtype;
+  v_user_message public.agent_messages%rowtype;
+  v_agent_message public.agent_messages%rowtype;
+  v_runtime_event public.runtime_events%rowtype;
+begin
+  insert into public.agent_threads (
+    campaign_id,
+    workspace,
+    agent_id,
+    visible_to_workspace,
+    owner_id
+  )
+  values (
+    p_campaign_id,
+    p_workspace,
+    p_agent_id,
+    true,
+    p_owner_id
+  )
+  on conflict (campaign_id, workspace, agent_id)
+  do update set
+    visible_to_workspace = excluded.visible_to_workspace,
+    owner_id = coalesce(excluded.owner_id, public.agent_threads.owner_id)
+  returning * into v_thread;
+
+  insert into public.agent_messages (
+    thread_id,
+    role,
+    text,
+    model_mode,
+    owner_id
+  )
+  values (
+    v_thread.id,
+    'user',
+    p_user_text,
+    'user',
+    p_owner_id
+  )
+  returning * into v_user_message;
+
+  insert into public.agent_messages (
+    thread_id,
+    role,
+    text,
+    model_mode,
+    owner_id
+  )
+  values (
+    v_thread.id,
+    'agent',
+    p_answer_text,
+    p_model_mode,
+    p_owner_id
+  )
+  returning * into v_agent_message;
+
+  insert into public.runtime_events (
+    id,
+    campaign_id,
+    workspace,
+    type,
+    actor,
+    owner_id,
+    payload
+  )
+  values (
+    concat('agent_message_', gen_random_uuid()::text),
+    p_campaign_id,
+    p_workspace,
+    'agent_message',
+    p_agent_id,
+    p_owner_id,
+    jsonb_build_object(
+      'campaign_id', p_campaign_id,
+      'workspace', p_workspace,
+      'agent_id', p_agent_id,
+      'role', 'agent',
+      'text', p_answer_text,
+      'thread_id', v_thread.id,
+      'user_message_id', v_user_message.id,
+      'agent_message_id', v_agent_message.id
+    )
+  )
+  returning * into v_runtime_event;
+
+  return jsonb_build_object(
+    'thread_id', v_thread.id,
+    'user_message_id', v_user_message.id,
+    'agent_message_id', v_agent_message.id,
+    'runtime_event_id', v_runtime_event.id,
+    'thread', to_jsonb(v_thread),
+    'user_message', to_jsonb(v_user_message),
+    'agent_message', to_jsonb(v_agent_message),
+    'runtime_event', to_jsonb(v_runtime_event)
+  );
+end;
+$$;

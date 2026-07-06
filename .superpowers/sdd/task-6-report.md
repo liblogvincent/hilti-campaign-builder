@@ -49,3 +49,31 @@ Concerns:
 - Message persistence is still sequential, not transactional, so a partial write is possible if Supabase fails mid-turn.
 - `/api/agent` uses phase-to-workspace routing for persistence; if that request shape changes later, this mapping may need to be revisited.
 
+## Task 6 Atomic Persistence Fix Report
+
+Files changed:
+- `server/agent-runtime.mjs`
+- `server/panda-api.mjs`
+- `server/panda-api.test.mjs`
+- `server/runtime-api.test.mjs`
+- `supabase/migrations/202607060001_durable_panda_runtime.sql`
+- `.superpowers/sdd/task-6-report.md`
+
+Tests run:
+- `npm test -- server/runtime-api.test.mjs` - passed
+- `npm test -- server/panda-api.test.mjs` - passed
+- `npm test` - passed
+
+Commit hash:
+- `6c6dad8` - `fix: make agent turn persistence atomic`
+
+Self-review:
+- `persistAgentTurn()` now goes through one `supabase.rpc("persist_agent_turn", ...)` call, so thread, message, and runtime-event writes happen in one database transaction.
+- The new PostgreSQL function returns the created thread, messages, and runtime event ids/payload in one JSON response, which is enough for tracing without extra round-trips.
+- `handleAgent()` and `handleOrchestrator()` now return a 503 error payload when Supabase persistence fails, instead of sending a 200 that looks successful.
+- The updated tests fail if `persistAgentTurn()` falls back to table writes or if the handlers swallow RPC errors.
+
+Concerns:
+- I did not execute the Supabase migration against a live database in this workspace, so the SQL function still needs environment-level rollout verification.
+- The RPC payload currently uses `model_mode` and the turn body text only; if we later want richer audit metadata, the function signature will need a small extension.
+
