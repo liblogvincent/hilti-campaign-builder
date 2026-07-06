@@ -44,3 +44,4 @@ Completed.
 - Commit hash: `ee642a8`
 - Self-review: snapshot acceptance now clears the per-campaign planning, content requirement, content object, and rollout object caches so the UI recomputes from the durable snapshot plan instead of stale derived objects.
 - Concerns: this is the narrow bridge for Task 7 only; Task 8 still needs the fuller snapshot-driven workspace hydration path.
+- Follow-up fix: snapshot responses now skip local server-update replay, so stale derived caches are not repopulated after invalidation. Tests: npm run build; npm test -- src/lib/panda.test.ts. Commit: pending.

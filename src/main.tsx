@@ -293,7 +293,8 @@ function App() {
       const packet = (await response.json()) as PandaOrchestratorResponse;
       const serverUpdates = normalizeServerUpdates(packet.updates);
       let serverApplied = false;
-      if (packet.snapshot?.plan) {
+      const hasRuntimeSnapshot = Boolean(packet.snapshot?.plan);
+      if (hasRuntimeSnapshot) {
         updateRun((current) => ({
           ...current,
           snapshot: packet.snapshot,
@@ -324,12 +325,14 @@ function App() {
         });
         serverApplied = true;
       }
-      for (const update of serverUpdates) {
-        if (update.action === "update_planning_object" && targetView === "campaign-planning") {
-          serverApplied = applyCampaignPlanningInstructionToWorkspace(update.note) || serverApplied;
-        }
-        if (update.action === "update_content_requirements" && targetView === "content-planning") {
-          serverApplied = applyContentPlanningInstructionToWorkspace(update.note) || serverApplied;
+      if (!hasRuntimeSnapshot) {
+        for (const update of serverUpdates) {
+          if (update.action === "update_planning_object" && targetView === "campaign-planning") {
+            serverApplied = applyCampaignPlanningInstructionToWorkspace(update.note) || serverApplied;
+          }
+          if (update.action === "update_content_requirements" && targetView === "content-planning") {
+            serverApplied = applyContentPlanningInstructionToWorkspace(update.note) || serverApplied;
+          }
         }
       }
       const answerSuffix = serverApplied ? "\n\nWorkspace objects were updated from this answer." : "";
