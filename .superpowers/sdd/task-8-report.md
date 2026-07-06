@@ -59,6 +59,6 @@ Done.
 ## Task 8 Runtime Snapshot Strict Evidence Fix Report
 - Files changed: `src/main.tsx`, `src/lib/panda.ts`, `src/lib/panda.test.ts`, `.superpowers/sdd/task-8-report.md`
 - Tests run: `npm test -- src/lib/panda.test.ts` - passed; `npm test` - passed; `npm run build` - passed
-- Commit hash: pending
+- Commit hash: `4ed615c`
 - Self-review: no-replay and unavailable-after-commit responses now clear stale active-campaign runtime snapshots even without a snapshot body, and runtime evidence now requires recognizable record fields instead of accepting empty objects.
 - Concerns: evidence keys are intentionally explicit; if Supabase runtime payloads add new durable record shapes, extend the allow-list rather than loosening it back to arbitrary objects.
