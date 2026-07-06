@@ -38,6 +38,6 @@ Done.
 ## Task 8 Evidence Reset Fix Report
 - Files changed: `src/main.tsx`, `.superpowers/sdd/task-8-report.md`
 - Tests run: `npm test -- src/lib/panda.test.ts`, `npm test`, `npm run build`
-- Commit hash: pending
+- Commit hash: 70188d0
 - Self-review: `resetWorkspace()` now clears the runtime evidence map along with runtime snapshots, preventing stale runtime provenance badges after reset.
 - Concerns: no component-level reset regression test exists; verification is through full build/test suite.
