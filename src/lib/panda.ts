@@ -173,12 +173,40 @@ export function normalizeCampaignSnapshot(raw: unknown): CampaignRuntimeSnapshot
   return {
     campaign,
     plan,
-    workObjects: workObjectsRaw ? normalizePlanningWorkObjects(workObjectsRaw, plan) : campaignPlanningObjectsFromPlan(plan),
-    contentRequirements: contentRequirementsRaw ? normalizeContentRequirements(contentRequirementsRaw, plan) : contentRequirementsFromPlan(plan),
+    workObjects: normalizePlanningWorkObjects(workObjectsRaw, plan),
+    contentRequirements: normalizeContentRequirements(contentRequirementsRaw, plan),
     gateDecisions: normalizeGateDecisions(pickRawArray(record, "gateDecisions", "gate_decisions")),
     events: normalizeRuntimeEvents(pickRawArray(record, "events")),
     agentThreads: pickRawArray(record, "agentThreads", "agent_threads") ?? []
   };
+}
+
+export function runtimeSnapshotCampaignId(raw: unknown, fallbackCampaignId: string): string {
+  const record = isRecord(raw) ? raw : {};
+  const campaignRecord = isRecord(record.campaign) ? record.campaign : record;
+  const candidate =
+    stringValue(campaignRecord.id) ||
+    stringValue(campaignRecord.campaignId) ||
+    stringValue(campaignRecord.campaign_id) ||
+    stringValue(record.campaignId) ||
+    stringValue(record.campaign_id);
+
+  return candidate && candidate !== "campaign-unknown" ? candidate : fallbackCampaignId;
+}
+
+export function runtimeSnapshotHasEvidence(raw: unknown): boolean {
+  const record = isRecord(raw) ? raw : {};
+  return [
+    record.events,
+    record.workObjects,
+    record.work_objects,
+    record.contentRequirements,
+    record.content_requirements,
+    record.gateDecisions,
+    record.gate_decisions,
+    record.agentThreads,
+    record.agent_threads
+  ].some(hasRuntimeRecords);
 }
 
 function normalizeCampaignRecord(record: Record<string, unknown>) {
@@ -205,15 +233,15 @@ function normalizeCampaignPlan(rawPlan: unknown, campaign: CampaignRuntimeSnapsh
     audience: stringArray(record.audience, ["Contractors", "Specifiers"]),
     budget: stringValue(record.budget) || inferBudget(brief),
     timeline: stringValue(record.timeline) || "Q4 launch window; no auto-publish before H3 approval.",
-    channels,
+    channels: channels.length ? channels : defaultPlanChannels(),
     kpis: stringArray(record.kpis, ["Qualified HOL visits", "H3 publish readiness without auto-publish"]),
     assumptions: stringArray(record.assumptions, ["Agent-generated plan normalized by Panda."])
   };
 }
 
 function normalizePlanningWorkObjects(raw: unknown, plan: CampaignPlan): PlanningWorkObject[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((item, index) => {
+  if (!Array.isArray(raw)) return campaignPlanningObjectsFromPlan(plan);
+  const normalized = raw.flatMap((item, index) => {
     if (!isRecord(item)) return [];
     const lane = normalizePlanningLane(item.lane);
     const title = stringValue(item.title) || `Planning object ${index + 1}`;
@@ -231,11 +259,12 @@ function normalizePlanningWorkObjects(raw: unknown, plan: CampaignPlan): Plannin
       }
     ];
   });
+  return normalized.length ? normalized : campaignPlanningObjectsFromPlan(plan);
 }
 
 function normalizeContentRequirements(raw: unknown, plan: CampaignPlan): ContentRequirement[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((item, index) => {
+  if (!Array.isArray(raw)) return contentRequirementsFromPlan(plan);
+  const normalized = raw.flatMap((item, index) => {
     if (!isRecord(item)) return [];
     const channel = normalizeRequirementChannel(item.channel);
     const assetType = stringValue(item.assetType) || stringValue(item.asset_type) || "Content asset";
@@ -260,6 +289,7 @@ function normalizeContentRequirements(raw: unknown, plan: CampaignPlan): Content
       }
     ];
   });
+  return normalized.length ? normalized : contentRequirementsFromPlan(plan);
 }
 
 function normalizeGateDecisions(raw: unknown): GateDecision[] {
@@ -2476,7 +2506,9 @@ function titleForAsset(heroProduct: string, channel: CampaignPlanChannel["name"]
 }
 
 function stringArray(value: unknown, fallback: string[]) {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : fallback;
+  if (!Array.isArray(value)) return fallback;
+  const normalized = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  return normalized.length ? normalized : fallback;
 }
 
 function stringValue(value: unknown) {
@@ -2497,6 +2529,10 @@ function titleCase(value: string) {
 function sentenceCase(value: string) {
   const clean = value.trim().toLowerCase();
   return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+function hasRuntimeRecords(value: unknown): boolean {
+  return Array.isArray(value) && value.some(isRecord);
 }
 
 export const backlogStories = [

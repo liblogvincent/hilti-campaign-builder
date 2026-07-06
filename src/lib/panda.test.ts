@@ -48,6 +48,8 @@ import {
   toolchainItems,
   visibleWorkspaceMessages,
   normalizeCampaignSnapshot,
+  runtimeSnapshotCampaignId,
+  runtimeSnapshotHasEvidence,
   workspaceAgentMessageKey
 } from "./panda";
 
@@ -752,6 +754,79 @@ describe("panda run model", () => {
     });
 
     expect(snapshot.plan.markets).toEqual(["China", "Japan", "Australia"]);
+  });
+
+  it("falls back from malformed snapshot arrays without erasing visible plan data", () => {
+    const snapshot = normalizeCampaignSnapshot({
+      campaign: { id: "camp_04", name: "Campaign", brief: "", phase: "planning", activeGate: "H1", ownerRole: "Campaign Owner" },
+      plan: {
+        campaignId: "camp_04",
+        name: "Campaign",
+        heroProduct: "TE2-22",
+        markets: ["China", "Japan", "Australia"],
+        locales: [],
+        audience: [],
+        budget: "EUR 50k",
+        timeline: "Q4",
+        channels: [],
+        kpis: [],
+        assumptions: [],
+      },
+      workObjects: [],
+      contentRequirements: [],
+      gateDecisions: [],
+      events: [],
+      agentThreads: [],
+    });
+
+    expect(snapshot.plan.markets).toEqual(["China", "Japan", "Australia"]);
+    expect(snapshot.plan.locales).toEqual(["de-DE", "de-AT", "de-CH", "fr-CH"]);
+    expect(snapshot.plan.audience).toEqual(["Contractors", "Specifiers"]);
+    expect(snapshot.plan.kpis).toEqual(["Qualified HOL visits", "H3 publish readiness without auto-publish"]);
+    expect(snapshot.plan.assumptions).toEqual(["Agent-generated plan normalized by Panda."]);
+  });
+
+  it("derives work and content requirements when snapshot arrays are empty", () => {
+    const snapshot = normalizeCampaignSnapshot({
+      campaign: { id: "camp_04", name: "Campaign", brief: "", phase: "planning", activeGate: "H1", ownerRole: "Campaign Owner" },
+      plan: {
+        campaignId: "camp_04",
+        name: "Campaign",
+        heroProduct: "TE2-22",
+        markets: ["China", "Japan", "Australia"],
+        locales: ["zh-CN", "ja-JP", "en-AU"],
+        audience: ["Contractors"],
+        budget: "EUR 50k",
+        timeline: "Q4",
+        channels: [],
+        kpis: ["Net sales"],
+        assumptions: [],
+      },
+      workObjects: [],
+      contentRequirements: [],
+      gateDecisions: [],
+      events: [],
+      agentThreads: [],
+    });
+
+    expect(snapshot.workObjects).toHaveLength(8);
+    expect(snapshot.workObjects[0].title).toBe("Campaign Objective");
+    expect(snapshot.contentRequirements.length).toBeGreaterThan(7);
+    expect(snapshot.contentRequirements.some((item) => item.channel === "Paid Media" && item.assetType === "Search ad headline")).toBe(true);
+  });
+
+  it("detects explicit runtime evidence instead of a bare snapshot object", () => {
+    expect(runtimeSnapshotHasEvidence(undefined)).toBe(false);
+    expect(runtimeSnapshotHasEvidence({})).toBe(false);
+    expect(runtimeSnapshotHasEvidence({ events: [] })).toBe(false);
+    expect(runtimeSnapshotHasEvidence({ workObjects: [] })).toBe(false);
+    expect(runtimeSnapshotHasEvidence({ events: [{ id: "evt_1" }] })).toBe(true);
+  });
+
+  it("keeps the active campaign id when a runtime snapshot id is malformed", () => {
+    expect(runtimeSnapshotCampaignId({ campaign: { id: "" } }, "camp_04")).toBe("camp_04");
+    expect(runtimeSnapshotCampaignId({ campaign: { id: "campaign-unknown" } }, "camp_04")).toBe("camp_04");
+    expect(runtimeSnapshotCampaignId({ campaign: { id: "camp_05" } }, "camp_04")).toBe("camp_05");
   });
 
   it("turns the campaign plan into H1 planning work objects", () => {

@@ -66,6 +66,8 @@ import {
   nextPhase,
   normalizeServerUpdates,
   normalizeCampaignSnapshot,
+  runtimeSnapshotCampaignId,
+  runtimeSnapshotHasEvidence,
   PandaAgentResponse,
   PandaArtifact,
   PandaOrchestratorResponse,
@@ -128,9 +130,11 @@ function App() {
   const [contentObjectRecords, setContentObjectRecords] = useState<Record<string, ContentWorkObject[]>>({});
   const [rolloutObjectRecords, setRolloutObjectRecords] = useState<Record<string, RolloutWorkObject[]>>({});
   const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, CampaignRuntimeSnapshot>>(() => runtimeSnapshotsFromWorkspace(initialWorkspace));
+  const [runtimeSnapshotEvidence, setRuntimeSnapshotEvidence] = useState<Record<string, boolean>>(() => runtimeSnapshotEvidenceFromWorkspace(initialWorkspace));
 
   const run = workspace.campaigns.find((campaign) => campaign.campaignId === workspace.activeCampaignId) ?? workspace.campaigns[0];
   const runtimeSnapshot = runtimeSnapshots[run.campaignId];
+  const runtimeSnapshotHasVisibleEvidence = runtimeSnapshotEvidence[run.campaignId] ?? false;
   const activePhase = currentPhaseMeta(run.phase);
   const phaseGate = run.currentGate?.id === activePhase.gate ? run.currentGate : undefined;
   const activeGateDecisions = runtimeSnapshot?.gateDecisions ?? run.gateDecisions;
@@ -306,7 +310,10 @@ function App() {
       const suppressLocalReplay = hasRuntimeSnapshot || packet.no_replay || packet.snapshot_status === "unavailable_after_commit";
       if (hasRuntimeSnapshot) {
         const snapshot = normalizeCampaignSnapshot(packet.snapshot);
-        setRuntimeSnapshots((current) => ({ ...current, [snapshot.campaign.id]: snapshot }));
+        const snapshotCampaignId = runtimeSnapshotCampaignId(packet.snapshot, run.campaignId);
+        const snapshotHasEvidence = runtimeSnapshotHasEvidence(packet.snapshot);
+        setRuntimeSnapshots((current) => ({ ...current, [snapshotCampaignId]: snapshot }));
+        setRuntimeSnapshotEvidence((current) => ({ ...current, [snapshotCampaignId]: snapshotHasEvidence }));
         updateRun((current) => ({
           ...current,
           snapshot: packet.snapshot
@@ -1567,6 +1574,7 @@ function WorkflowShell({
           readiness={planningReadiness}
           requirements={contentRequirements}
           runtimeSnapshot={runtimeSnapshot}
+          runtimeSnapshotHasEvidence={runtimeSnapshotHasVisibleEvidence}
           onApplyFeedback={onApplyCampaignPlanningFeedback}
           onUpdate={onUpdatePlanningObject}
         />
@@ -1621,6 +1629,7 @@ function CampaignPlanningWorkspace({
   readiness,
   requirements,
   runtimeSnapshot,
+  runtimeSnapshotHasEvidence,
   onApplyFeedback,
   onUpdate
 }: {
@@ -1629,6 +1638,7 @@ function CampaignPlanningWorkspace({
   readiness: PlanningReadiness;
   requirements: ContentRequirement[];
   runtimeSnapshot?: CampaignRuntimeSnapshot;
+  runtimeSnapshotHasEvidence: boolean;
   onApplyFeedback: (proposal: LeadershipFeedbackProposal) => void;
   onUpdate: (id: string, status: WorkObjectStatus, comment: string) => void;
 }) {
@@ -1694,7 +1704,7 @@ function CampaignPlanningWorkspace({
             </div>
             <span className="objectStatus in-review">H1 packet</span>
           </div>
-          {runtimeSnapshot && <span className="updatedByPanda">Updated by Panda runtime</span>}
+          {runtimeSnapshotHasEvidence && <span className="updatedByPanda">Updated by Panda runtime</span>}
 
           <div className="planSummary">
             <article><small>Markets</small><strong>{plan.markets.join(", ")}</strong></article>
@@ -2670,6 +2680,16 @@ function runtimeSnapshotsFromWorkspace(workspace: CampaignWorkspace) {
   return workspace.campaigns.reduce<Record<string, CampaignRuntimeSnapshot>>((accumulator, campaign) => {
     if (!campaign.snapshot) return accumulator;
     accumulator[campaign.campaignId] = normalizeCampaignSnapshot(campaign.snapshot);
+    return accumulator;
+  }, {});
+}
+
+function runtimeSnapshotEvidenceFromWorkspace(workspace: CampaignWorkspace) {
+  return workspace.campaigns.reduce<Record<string, boolean>>((accumulator, campaign) => {
+    if (!campaign.snapshot) return accumulator;
+    if (runtimeSnapshotHasEvidence(campaign.snapshot)) {
+      accumulator[campaign.campaignId] = true;
+    }
     return accumulator;
   }, {});
 }
