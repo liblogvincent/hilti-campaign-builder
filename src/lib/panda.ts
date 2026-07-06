@@ -878,22 +878,31 @@ export function classifyHomeIntent(prompt: string): HomeIntent {
   if (!text) return { type: "chat" };
   const route = routeIntent(text);
   if (route) return { type: "route", view: route };
-  if (/\b(create|start|launch|build|plan)\b/.test(text) && /\bcampaign\b/.test(text)) {
-    if (/\b(now|confirm|go ahead|create it|use this brief|ready to create)\b/.test(text) || hasCampaignBriefMinimum(text)) {
-      return { type: "create-campaign" };
-    }
-    return { type: "plan-campaign" };
-  }
   if (/\b(status|progress|blocked|blocker|missing|ready|where are we)\b/.test(text)) return { type: "status" };
   if (/\b(update|change|revise|adjust|edit)\b/.test(text) && /\b(campaign|plan|planning|brief|objective|audience|kpi|budget|channel)\b/.test(text)) {
     return { type: "update-campaign" };
   }
-  return { type: "chat" };
+
+  const hasProduct = /\b(te|siw|nur|bx|ag|pd|laser|drill|anchor|tool)\w*/i.test(text);
+  const hasCampaignWord = /\bcampaign\b/.test(text);
+  if (!hasProduct && !hasCampaignWord) return { type: "chat" };
+
+  const hasCreationVerb = /\b(create|start|launch|build|plan)\b/.test(text);
+  if (!hasCreationVerb) return { type: "plan-campaign" };
+
+  const hasAudience = /\b(contractor|installer|specifier|mocn|audience|segment|persona)\b/i.test(text);
+  const hasMarket = /\b(dach|germany|austria|switzerland|de|at|ch|eu|market|region)\b/i.test(text);
+  const hasChannel = /\b(email|paid|social|sprinklr|contentful|hol|linkedin|google|meta)\b/i.test(text);
+  const hasBudgetOrTiming = /\b(budget|eur|euro|q[1-4]|launch|timeline|date|week|month)\b/i.test(text);
+  const signalCount = [hasProduct, hasAudience, hasMarket, hasChannel, hasBudgetOrTiming].filter(Boolean).length;
+
+  if (signalCount >= 3) return { type: "create-campaign" };
+  return { type: "plan-campaign" };
 }
 
 export function buildHomeCampaignDiscoveryReply(prompt: string) {
   const product = extractProductMention(prompt) || "the product";
-  return `I can help plan a campaign for ${product}, but I should not create the campaign workspace yet. To make the brief usable, tell me the audience, markets/locales, primary channels, budget or scale, KPIs, and timing. You can answer in one sentence, then say "create it" when you want me to create the campaign workspace.`;
+  return `I can help shape this into a campaign brief for ${product}. I still need: audience/persona, target markets or locales, channels, KPI, budget or timing. Tell me those, or say 'create it' once the brief is ready.`;
 }
 
 export function isHomeCampaignCreationIntent(prompt: string): boolean {
@@ -930,13 +939,6 @@ export function compactAgentMessages<T extends { id: string; role: string; text:
 
 function normalizeMessageText(text: string) {
   return text.trim().replace(/\s+/g, " ");
-}
-
-function hasCampaignBriefMinimum(text: string) {
-  const hasAudience = /\b(for|target|audience|persona|mocn|contractor|specifier|installer|manager)\b/.test(text);
-  const hasMarket = /\b(dach|emea|eu|de|at|ch|nl|be|markets?|locales?)\b/.test(text);
-  const hasChannel = /\b(linkedin|google|meta|email|hol|landing page|sprinklr|sfmc|paid media|channels?)\b/.test(text);
-  return hasAudience && hasMarket && hasChannel;
 }
 
 function extractProductMention(prompt: string) {

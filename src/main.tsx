@@ -491,15 +491,37 @@ function App() {
   function submitHomePrompt() {
     const prompt = homePrompt.trim();
     if (!prompt) return;
-    const intent = classifyHomeIntent(prompt);
+    const confirmsDraftBrief = /\b(create it|use this brief|ready to create|go ahead)\b/i.test(prompt);
+    const recentHomeBrief = globalPandaMessages
+      .filter((message) => message.role === "user")
+      .slice(-3)
+      .map((message) => message.text)
+      .join(" ")
+      .trim();
+    const promptForIntent = confirmsDraftBrief && recentHomeBrief ? `${recentHomeBrief} ${prompt}` : prompt;
+    const intent = classifyHomeIntent(promptForIntent);
 
     if (intent.type === "create-campaign") {
-      createCampaignFromPrompt(prompt);
+      createCampaignFromPrompt(confirmsDraftBrief && recentHomeBrief ? recentHomeBrief : prompt);
+      return;
+    }
+    if (confirmsDraftBrief) {
+      setHomePrompt("");
+      setGlobalPandaMessages((items) => [
+        ...items,
+        { id: crypto.randomUUID(), role: "user", text: prompt },
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          text: buildHomeCampaignDiscoveryReply(promptForIntent),
+          highlights: ["Brief discovery", "No campaign created yet", "More campaign detail needed"],
+          actions: ["Add audience, market, channel, KPI, budget, or timing", "Then say create it"]
+        }
+      ]);
       return;
     }
     if (intent.type === "plan-campaign") {
       setHomePrompt("");
-      addMessage(run.campaignId, { role: "user", text: prompt });
       setGlobalPandaOpen(false);
       setGlobalPandaMessages((items) => [
         ...items,

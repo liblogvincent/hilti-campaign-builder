@@ -173,6 +173,15 @@ describe("panda run model", () => {
     expect(isHomeCampaignCreationIntent("hello campaign")).toBe(false);
   });
 
+  it("does not create a campaign from a shallow product mention", () => {
+    expect(classifyHomeIntent("TE70")).toEqual({ type: "plan-campaign" });
+    expect(classifyHomeIntent("launch a campaign of TE70").type).toBe("plan-campaign");
+  });
+
+  it("creates a campaign only when the user gives a launch action and enough brief detail", () => {
+    expect(classifyHomeIntent("create campaign for TE70 in DACH for installers with paid media and email").type).toBe("create-campaign");
+  });
+
   it("asks campaign brief questions before creating a shallow campaign", () => {
     const reply = buildHomeCampaignDiscoveryReply("launch a campaign for TE60-22");
 
@@ -181,6 +190,7 @@ describe("panda run model", () => {
     expect(reply).toContain("markets");
     expect(reply).toContain("channels");
     expect(reply).toContain("create it");
+    expect(reply).toContain("brief");
   });
 
   it("restores a persisted app view only when it is valid", () => {
