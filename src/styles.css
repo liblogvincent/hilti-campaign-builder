@@ -545,12 +545,30 @@
   .planningWorkspaceGrid,
   .skillsHubGrid,
   .leadershipFeedbackPanel,
+  .rmbDeliverableGrid,
+  .artifactWorkspaceGrid,
   .slidePreviewGrid {
     grid-template-columns: 1fr;
   }
 
   .previewHeader {
     display: grid;
+  }
+
+  .artifactWorkspaceHeader {
+    display: grid;
+  }
+
+  .rmbDeliverablesHeader {
+    flex-direction: column;
+  }
+
+  .rmbDeliverablesHeader h2 {
+    font-size: 28px;
+  }
+
+  .rmbDeliverablesHeader > span {
+    align-self: flex-start;
   }
 
   .sideNav {
@@ -2362,8 +2380,16 @@ footer {
   line-height: 1.45;
 }
 
+.homeWorkArea {
+  width: min(1280px, 100%);
+  display: grid;
+  grid-template-columns: minmax(460px, 1.25fr) minmax(340px, 0.75fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
 .promptCard {
-  width: min(920px, 100%);
+  width: 100%;
   display: grid;
   grid-template-rows: auto minmax(160px, 1fr) auto auto;
   min-height: 470px;
@@ -2425,9 +2451,10 @@ footer {
 
 .promptActions {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto auto 52px;
   gap: 12px;
   align-items: center;
+  justify-content: end;
 }
 
 .homeAgentTranscript {
@@ -2478,6 +2505,24 @@ footer {
   line-height: 1.45;
 }
 
+.homeMessageRoute {
+  width: fit-content;
+  min-height: 30px;
+  margin-top: 10px;
+  padding: 0 10px;
+  border: 1px solid var(--hilti);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--hilti);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.homeMessageRoute:hover {
+  background: var(--hilti);
+  color: #fff;
+}
+
 .modePicker {
   justify-self: end;
   display: inline-grid;
@@ -2502,6 +2547,103 @@ footer {
   background: var(--hilti);
   color: white;
   border-color: var(--hilti);
+}
+
+.homeDraftCanvas {
+  min-height: 470px;
+  max-height: min(620px, 72vh);
+  padding: 20px;
+  border: 1px solid #ddd;
+  background: #fffdfb;
+  box-shadow: 0 24px 80px rgba(21, 24, 22, 0.1);
+  text-align: left;
+  overflow-y: auto;
+}
+
+.homeDraftCanvas.empty {
+  display: grid;
+  align-content: center;
+  gap: 14px;
+}
+
+.homeDraftCanvas.empty h2,
+.draftCanvasHead h2 {
+  margin: 4px 0 0;
+  font-family: PandaDisplay, sans-serif;
+  font-size: 32px;
+  line-height: 1;
+}
+
+.homeDraftCanvas.empty p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.draftCanvasHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.draftCanvasHead span {
+  min-width: max-content;
+  padding: 7px 10px;
+  border: 1px solid #f0c3c9;
+  background: #fff4f5;
+  color: var(--hilti);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.draftSectionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.draftSectionGrid article,
+.draftListBlock {
+  padding: 12px;
+  border: 1px solid #eadfda;
+  background: #fff;
+}
+
+.draftSectionGrid small {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.draftSectionGrid p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.draftListBlock {
+  margin-top: 12px;
+}
+
+.draftListBlock b {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.draftListBlock ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.draftListBlock li {
+  margin: 5px 0;
+  line-height: 1.35;
 }
 
 .recentCampaigns,
@@ -3110,6 +3252,307 @@ footer {
   margin: 0;
   color: #555;
   line-height: 1.45;
+}
+
+.rmbDeliverablesPanel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.rmbDeliverablesHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.rmbDeliverablesHeader small,
+.rmbDeliverableTop small {
+  color: #777;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.rmbDeliverablesHeader h2 {
+  margin: 4px 0 6px;
+  font-family: PandaDisplay, sans-serif;
+  font-size: clamp(24px, 2.4vw, 34px);
+  line-height: 1;
+}
+
+.rmbDeliverablesHeader p {
+  max-width: 760px;
+  margin: 0;
+  color: #555;
+  line-height: 1.45;
+}
+
+.rmbDeliverablesHeader > span {
+  white-space: nowrap;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 11px;
+  border: 1px solid #f0c9c5;
+  border-radius: 10px;
+  background: #fff4f3;
+  color: var(--hilti);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.rmbDeliverableGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.rmbDeliverableCard {
+  min-height: 248px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e5d8c6;
+  border-radius: 12px;
+  background: #fffdf8;
+}
+
+.rmbDeliverableCard.selected {
+  border-color: #d2051e;
+  box-shadow: 0 0 0 2px rgba(210, 5, 30, 0.08);
+}
+
+.rmbDeliverableTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.rmbDeliverableTop h3 {
+  margin: 4px 0 0;
+  font-size: 17px;
+  line-height: 1.15;
+}
+
+.outputFormatRow,
+.deliverableSections,
+.deliverableActions,
+.deliverableFooter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.outputFormatRow span {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid #d2051e;
+  border-radius: 8px;
+  background: #fff4f3;
+  color: var(--hilti);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.rmbDeliverableCard p {
+  margin: 0;
+  color: #333;
+  line-height: 1.4;
+}
+
+.deliverableSections span {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: #555;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.deliverableOpen,
+.deliverableDownload,
+.deliverableRevise {
+  align-self: flex-start;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid #d2051e;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--hilti);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.deliverableOpen {
+  border-color: var(--line);
+  background: #f8f8f8;
+  color: #222;
+}
+
+.deliverableRevise {
+  border-color: rgba(210, 5, 30, 0.24);
+  background: #fff8f7;
+  color: #8f0a19;
+}
+
+.deliverableDownload:hover {
+  background: #d2051e;
+  color: #fff;
+}
+
+.deliverableOpen:hover {
+  border-color: #d2051e;
+  background: #fff4f3;
+  color: #d2051e;
+}
+
+.deliverableRevise:hover {
+  border-color: #d2051e;
+  background: #fff4f3;
+  color: #d2051e;
+}
+
+.artifactWorkspaceActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.deliverableFooter {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  justify-content: space-between;
+  color: #666;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.rmbArtifactWorkspace {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #d9cbb9;
+  border-left: 4px solid #d2051e;
+  border-radius: 12px;
+  background: #fffaf0;
+}
+
+.artifactWorkspaceHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.artifactWorkspaceHeader small,
+.artifactWorkspaceGrid h4,
+.artifactWorkspaceGrid article small {
+  color: #777;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.artifactWorkspaceHeader h3 {
+  margin: 4px 0 6px;
+  font-family: PandaDisplay, sans-serif;
+  font-size: clamp(24px, 2.2vw, 34px);
+  line-height: 1;
+}
+
+.artifactWorkspaceHeader p {
+  margin: 0;
+  color: #555;
+}
+
+.artifactWorkspaceGrid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 0.9fr;
+  gap: 12px;
+}
+
+.artifactWorkspaceGrid section {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e5d8c6;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.artifactWorkspaceGrid h4 {
+  margin: 0;
+}
+
+.artifactWorkspaceGrid article {
+  display: grid;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.artifactWorkspaceGrid article:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.artifactWorkspaceGrid article p {
+  margin: 0;
+  color: #242424;
+  line-height: 1.45;
+}
+
+.artifactChipStack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.artifactChipStack span,
+.artifactHandoffLine span {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #555;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.artifactHandoffLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.artifactHandoffLine strong {
+  color: var(--hilti);
 }
 
 .slidePreviewGrid {
@@ -4271,6 +4714,7 @@ footer {
   .workflowPage,
   .progressGrid,
   .planningWorkspaceGrid,
+  .homeWorkArea,
   .objectDetailWorkspace,
   .rolloutDetailWorkspace,
   .skillsHubGrid {
@@ -4324,6 +4768,7 @@ footer {
   .appBody,
   .pageSurface,
   .homeHero,
+  .homeWorkArea,
   .pageHeader,
   .promptActions,
   .progressGrid,
@@ -4340,6 +4785,14 @@ footer {
   .rolloutBoard,
   .workObjectGrid {
     grid-template-columns: 1fr;
+  }
+
+  .draftSectionGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .promptActions {
+    grid-template-columns: 1fr auto auto;
   }
 
   .pageSurface {

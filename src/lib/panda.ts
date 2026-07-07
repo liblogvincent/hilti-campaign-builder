@@ -3,6 +3,43 @@ export type Status = "done" | "running" | "blocked" | "queued";
 export type GateId = "H1" | "H2" | "H3" | "H4" | "H-C" | "H-legal";
 export type AgentMode = "deepseek" | "fixture";
 export type AgentWorkMode = "Plan" | "Build";
+export type HomePromptMode = "plan" | "create";
+export type UrlResearchEvidence = {
+  ok: boolean;
+  url: string;
+  title?: string;
+  description?: string;
+  summary?: string;
+  facts?: string[];
+  error?: string;
+};
+
+export type HomeCampaignDraft = {
+  campaignName: string;
+  heroProduct: string;
+  objective: string;
+  audience: string[];
+  markets: string[];
+  locales: string[];
+  channels: string[];
+  kpiCandidates: string[];
+  budgetAssumptions: string;
+  timingAssumptions: string;
+  missingInputs: string[];
+  sourceEvidence: string[];
+};
+
+export type HomeDraftResponse = {
+  mode: AgentMode;
+  warning?: string;
+  answer: string;
+  draft: HomeCampaignDraft;
+  suggested_actions: string[];
+};
+export type HomeTurnResponse = HomeDraftResponse & {
+  draftPatch?: Partial<HomeCampaignDraft>;
+  intent?: string;
+};
 export type AppView =
   | "home"
   | "progress"
@@ -12,6 +49,90 @@ export type AppView =
   | "rollout"
   | "optimize"
   | "skills";
+
+export function mergeHomeDraft(base: HomeCampaignDraft, patch?: Partial<HomeCampaignDraft>): HomeCampaignDraft {
+  if (!patch) return base;
+  return {
+    campaignName: homeStringPatch(patch.campaignName, base.campaignName),
+    heroProduct: homeStringPatch(patch.heroProduct, base.heroProduct),
+    objective: homeStringPatch(patch.objective, base.objective),
+    audience: homeArrayPatch(patch.audience, base.audience),
+    markets: homeArrayPatch(patch.markets, base.markets),
+    locales: homeArrayPatch(patch.locales, base.locales),
+    channels: homeArrayPatch(patch.channels, base.channels),
+    kpiCandidates: homeArrayPatch(patch.kpiCandidates, base.kpiCandidates),
+    budgetAssumptions: homeStringPatch(patch.budgetAssumptions, base.budgetAssumptions),
+    timingAssumptions: homeStringPatch(patch.timingAssumptions, base.timingAssumptions),
+    missingInputs: homeArrayPatch(patch.missingInputs, base.missingInputs),
+    sourceEvidence: homeArrayPatch(patch.sourceEvidence, base.sourceEvidence),
+  };
+}
+
+export function homeDraftQuestionAnswer(question: string, draft: HomeCampaignDraft): string {
+  const lower = question.toLowerCase();
+  if (lower.includes("assumption")) {
+    return [
+      "Here are the working assumptions in the draft:",
+      `Product focus: ${draft.heroProduct}.`,
+      `Audience: ${draft.audience.join(", ")}.`,
+      `Market scope: ${draft.markets.join(", ")}.`,
+      `Channels to explore: ${draft.channels.join(", ")}.`,
+      `Budget: ${draft.budgetAssumptions}.`,
+      `Timing: ${draft.timingAssumptions}.`,
+      `Still missing: ${draft.missingInputs.join(", ")}.`,
+    ].join("\n");
+  }
+  if (lower.includes("missing") || lower.includes("input")) {
+    return [
+      "Here is what I still need or would keep as a working assumption:",
+      ...draft.missingInputs.map((item) => `- ${item}`),
+      "You can give me any of these details, or I can keep drafting with assumptions and show the campaign plan before creating the workspace.",
+    ].join("\n");
+  }
+  return [
+    `The current draft is ${draft.campaignName}.`,
+    `Objective: ${draft.objective}`,
+    `Product focus: ${draft.heroProduct}.`,
+    `Market scope: ${draft.markets.join(", ")}.`,
+    "I can revise this here before creating the campaign workspace.",
+  ].join("\n");
+}
+
+export function createHomeDraftFallback(prompt: string, researchEvidence: UrlResearchEvidence[] = []): HomeCampaignDraft {
+  const product = cleanCampaignSubject(extractCampaignSubject(prompt)) || extractProductMention(prompt) || "the product";
+  const researched = researchEvidence.filter((item) => item.ok);
+  const evidence = researched.flatMap((item) => [
+    item.title ? `Page reviewed: ${item.title}.` : undefined,
+    item.summary ? `Observed: ${item.summary}` : undefined,
+    ...(item.facts?.slice(0, 3) ?? []),
+  ]).filter((item): item is string => Boolean(item));
+  const globalMarkets = /\b(global|all markets|all the markets|worldwide)\b/i.test(prompt);
+  const deferredBudget = /\bbudget\b/i.test(prompt) && /\b(after|defined after|to be defined|later)\b/i.test(prompt);
+  return {
+    campaignName: sentenceCase(`${product} campaign`),
+    heroProduct: product,
+    objective: `Create qualified demand for ${product}.`,
+    audience: ["Contractors", "Installers", "Trade buyers"],
+    markets: globalMarkets ? ["Global markets"] : ["Target markets TBD"],
+    locales: globalMarkets ? ["Market-localized variants TBD"] : ["Locale variants TBD"],
+    channels: ["Paid Media", "Email", "HOL Landing Page", "Organic/HN"],
+    kpiCandidates: ["Qualified HOL visits", "Campaign engagement", "Downstream conversion readiness"],
+    budgetAssumptions: deferredBudget ? "To be defined after Campaign Planning and Content Planning review" : "Budget owner and investment range need confirmation",
+    timingAssumptions: "Launch timing to be confirmed with campaign owner and market leaders",
+    missingInputs: ["Market priority", "Budget owner", "Timing owner", "Claim evidence"],
+    sourceEvidence: evidence.length ? evidence.slice(0, 8) : [`User asked for ${product}.`],
+  };
+}
+
+function homeStringPatch(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function homeArrayPatch(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return fallback;
+  const items = value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+  return items.length ? Array.from(new Set(items)) : fallback;
+}
 export type UserRole =
   | "Campaign Owner"
   | "Paid Media"
@@ -439,6 +560,11 @@ export type SpecialistAgentUpdate =
       target: "content_requirements";
       action: "replace";
       requirements: ContentRequirement[];
+    }
+  | {
+      target: "rmb_deliverable";
+      id: string;
+      patch: Partial<Pick<RmbDeliverable, "summary" | "status" | "previewItems" | "artifactDetails" | "discussionNotes" | "workspaceAction">>;
     };
 
 export type SpecialistAgentResponse = {
@@ -519,6 +645,79 @@ export type ContentWorkObject = {
   evidence: string[];
   actions: Array<"Comment" | "Edit" | "Ask AI to revise" | "Approve" | "Request revision" | "Flag compliance" | "Attach evidence">;
 };
+
+export type RmbOutputFormat =
+  | "PPTX"
+  | "Excel"
+  | "Figma mock"
+  | "Figma board"
+  | "Mapping table"
+  | "Contentful preview"
+  | "XLS"
+  | "Asset manifest"
+  | "DAM package"
+  | "Compliance report";
+
+export type RmbDeliverable = {
+  id: string;
+  title: string;
+  workspace: "Campaign Planning" | "Content Planning" | "Content";
+  gate: GateId;
+  owner: UserRole;
+  requestedBy: string;
+  outputFormats: RmbOutputFormat[];
+  sections: string[];
+  summary: string;
+  previewItems: string[];
+  sourceInputs: string[];
+  handoffTarget: "Content Planning" | "Content" | "Rollout" | "Leadership" | "DAM / Compliance";
+  approvalLevel: "object" | "object-and-final" | "gate";
+  status: WorkObjectStatus;
+  artifactDetails: Array<{ label: string; value: string }>;
+  discussionNotes: string[];
+  workspaceAction: string;
+};
+
+export function campaignThemeHeadline(heroProduct: string): string {
+  const normalized = heroProduct.toLowerCase();
+  if (normalized.includes("cold cut")) return "Cut Clean. Cut Fast";
+  if (normalized.includes("diamond coring")) return "Core with Confidence";
+  if (normalized.includes("te 70") || normalized.includes("rotary hammer") || normalized.includes("heavy")) {
+    return "Power Up with Real Power";
+  }
+  return "Built for the Job";
+}
+
+export function campaignThemeForPlan(plan: CampaignPlan): string {
+  return `${campaignThemeHeadline(plan.heroProduct)}: ${titleCase(plan.heroProduct)} campaign for ${plan.markets.join(", ")}`;
+}
+
+export function artifactRevisionPrompt(deliverable: Pick<RmbDeliverable, "title" | "workspace" | "sections" | "handoffTarget" | "workspaceAction">): string {
+  const focus = deliverable.sections.slice(0, 3).join(", ");
+  return `Revise ${deliverable.title} in ${deliverable.workspace}. Focus on ${focus}. Keep it ready for ${deliverable.handoffTarget} handoff and explain what changed. ${deliverable.workspaceAction}`;
+}
+
+function withRmbDeliverableDefaults(
+  items: Array<
+    Omit<RmbDeliverable, "summary" | "artifactDetails" | "discussionNotes" | "workspaceAction"> &
+      Partial<Pick<RmbDeliverable, "summary" | "artifactDetails" | "discussionNotes" | "workspaceAction">>
+  >
+): RmbDeliverable[] {
+  return items.map((item) => ({
+    ...item,
+    summary: item.summary ?? item.previewItems[0] ?? item.title,
+    artifactDetails: item.artifactDetails ?? [
+      { label: "Current output", value: item.previewItems.join(" ") },
+      { label: "Sections", value: item.sections.join(", ") },
+      { label: "Source inputs", value: item.sourceInputs.join(", ") }
+    ],
+    discussionNotes: item.discussionNotes ?? [
+      `Panda generated this ${item.workspace} artifact from the active campaign context.`,
+      `It is ready to review as a ${item.outputFormats.join(" / ")} preview before ${item.handoffTarget} handoff.`
+    ],
+    workspaceAction: item.workspaceAction ?? `Open and revise ${item.title}`
+  }));
+}
 
 export type CampaignPlanChannel = {
   id: string;
@@ -743,7 +942,7 @@ export const phases: Array<{ id: PhaseId; label: string; agents: string; gate: G
     label: "Plan",
     agents: "A0 A1 A2 A3 A4 A5",
     gate: "H1",
-    description: "Turn the brief into the H1 campaign plan packet: objective, audience, channels, KPIs, budget, risks, and downstream handoff."
+    description: "Turn the brief into the campaign plan: objective, audience, channels, KPIs, budget, risks, and downstream handoff."
   },
   {
     id: "content",
@@ -1204,19 +1403,23 @@ export function agentModeForPhase(phase: PhaseId): AgentWorkMode {
 
 export function classifyHomeIntent(prompt: string): HomeIntent {
   const text = prompt.trim().toLowerCase();
+  const textWithoutUrls = stripUrls(text).trim();
   if (!text) return { type: "chat" };
-  const route = routeIntent(text);
+  const route = routeIntent(textWithoutUrls);
   if (route) return { type: "route", view: route };
   if (/\b(status|progress|blocked|blocker|missing|ready|where are we)\b/.test(text)) return { type: "status" };
-  if (/\b(update|change|revise|adjust|edit)\b/.test(text) && /\b(campaign|plan|planning|brief|objective|audience|kpi|budget|channel)\b/.test(text)) {
-    return { type: "update-campaign" };
-  }
 
   const productMatch = extractProductMention(prompt);
   const hasProduct = Boolean(productMatch);
   const hasCampaignWord = /\bcampaign\b/.test(text);
+  const startsNewCampaignRequest =
+    /\b(i\s+(want|need|would like)|start|launch|create|plan|build)\b[\s\S]{0,120}\bcampaign\b/.test(text) ||
+    /\bcampaign\s+(for|of|about)\b/.test(text);
 
   if (!hasProduct && !hasCampaignWord) return { type: "chat" };
+  if (!startsNewCampaignRequest && /\b(update|change|revise|adjust|edit)\b/.test(text) && /\b(campaign|plan|planning|brief|objective|audience|kpi|budget|channel)\b/.test(text)) {
+    return { type: "update-campaign" };
+  }
 
   const hasCreationVerb = /\b(create|start|launch|build|plan)\b/.test(text);
   if (!hasCreationVerb) return { type: "plan-campaign" };
@@ -1231,9 +1434,92 @@ export function classifyHomeIntent(prompt: string): HomeIntent {
   return { type: "plan-campaign" };
 }
 
-export function buildHomeCampaignDiscoveryReply(prompt: string) {
-  const product = extractProductMention(prompt) || "the product";
-  return `I can help shape this into a campaign brief for ${product}. I still need: audience/persona, target markets or locales, channels, KPI, budget or timing. Tell me those, or say 'create it' once the brief is ready.`;
+export function buildHomeCampaignDiscoveryReply(prompt: string, researchEvidence: UrlResearchEvidence[] = []) {
+  const product = extractProductMention(prompt) || cleanCampaignSubject(extractCampaignSubject(prompt)) || "the product";
+  const sources = extractSourceUrls(prompt);
+  const researched = researchEvidence.filter((item) => item.ok);
+  const researchLines = researched.flatMap((item) => [
+    item.title ? `Page reviewed: ${item.title}.` : undefined,
+    item.summary ? `What Panda observed: ${item.summary}` : undefined,
+    ...(item.facts?.slice(0, 4).map((fact) => `Evidence: ${fact}`) ?? [])
+  ]).filter(Boolean);
+  const markets = /\b(global|all markets|all the markets|worldwide)\b/i.test(prompt)
+    ? "Global markets, with market-leader review before final country prioritization"
+    : "Target markets/locales still need confirmation";
+  const budget = /\bbudget\b/i.test(prompt)
+    ? "Budget to be defined after Campaign Planning and Content Planning are shared with leadership and market leaders"
+    : "Budget still needs owner input";
+  const channels = inferHomeBriefChannels(prompt);
+  return [
+    `I can shape this before creating the workspace. Here is a first version for you to review.`,
+    `Initial brief for review`,
+    `Campaign idea: ${product} launch campaign.`,
+    sources.length ? `Source evidence: ${sources.join(", ")}.` : "Source evidence: product page, product docs, or brand playbook still needed.",
+    ...(researchLines.length ? [`Panda researched the linked page before drafting.`, ...researchLines.slice(0, 6)] : []),
+    `Market scope: ${markets}.`,
+    `Audience starting point: contractors, installers, and trade buyers. This can be refined with audience files or market feedback.`,
+    `${budget}.`,
+    `Initial plan to review`,
+    `Campaign Planning should confirm the objective, markets, success-measure ownership, budget logic, timing, and channels before anything is treated as final.`,
+    `Suggested first channel mix: ${channels}.`,
+    `Content Planning should turn the approved direction into a channel-by-asset matrix, including Figma mapping and locale needs.`,
+    `Content and Rollout can start from draft assumptions, but Panda should keep changes visible so later leadership or market input can update the plan cleanly.`,
+    `If this direction looks right, switch to Create and say "proceed". I will create the Campaign Planning draft for review.`
+  ].join("\n\n");
+}
+
+export function homeContinuationInstruction(prompt: string, recentAgentText: string): string | undefined {
+  const text = prompt.trim().toLowerCase();
+  const previous = recentAgentText.trim().toLowerCase();
+  const confirmsProceed = /\b(proceed|go ahead|continue|do it|yes|please draft|draft the rest|as you recommend|recommend)\b/.test(text);
+  const previousWasH1Planning =
+    previous.includes("missing inputs") ||
+    previous.includes("channel strategy") ||
+    previous.includes("h1 plan") ||
+    previous.includes("h1 planning") ||
+    previous.includes("planning objects") ||
+    previous.includes("initial plan to review") ||
+    previous.includes("campaign planning draft");
+  if (!confirmsProceed || !previousWasH1Planning) return undefined;
+  return "draft remaining H1 planning objects: Missing Inputs, Channel Strategy, Budget Allocation, Campaign Timeline, Assumptions & Risks";
+}
+
+export function isHomeDraftConfirmation(prompt: string): boolean {
+  return /\b(proceed|create it|use this brief|ready to create|go ahead|do it|yes create|make it)\b/i.test(prompt.trim());
+}
+
+export function shouldCreateHomeWorkspace(prompt: string, mode: HomePromptMode): boolean {
+  const normalized = prompt.toLowerCase();
+  if (/\b(before|not yet|show me|explain|review|assumption|missing)\b/i.test(normalized)) return false;
+  if (/\b(create|build|make)\b.*\b(workspace|campaign workspace|campaign plan|planning draft)\b/i.test(prompt)) return true;
+  if (/\bcreate campaign\b/i.test(prompt)) return true;
+  return mode === "create" && isHomeDraftConfirmation(normalized);
+}
+
+export function buildHomeRoleGuidanceReply(prompt: string): string | undefined {
+  const text = prompt.trim().toLowerCase();
+  if (/\b(content creator|copywriter|designer|content creation|create content|content expert)\b/.test(text)) {
+    return [
+      "For a content creator, the useful place to work is Content.",
+      "You can start from the current draft assumptions while Campaign Planning continues to refine channels, success measures, budget, and timing.",
+      "I recommend reviewing the paid media copy, landing page copy, email copy, and asset prompts first. If planning decisions change later, Panda will carry those updates into the content requirements.",
+      "Open Content when you want to review or create copy and assets; open Content Planning if you need to inspect the requirements matrix first."
+    ].join("\n\n");
+  }
+  if (/\b(campaign owner|campaign manager|owner)\b/.test(text)) {
+    return [
+      "As campaign owner, your best next workspace is Campaign Planning.",
+      "You can review the starter brief, decide audience and market priority, shape channel strategy, set success measures, and confirm budget or timing assumptions.",
+      "I can create a planning draft first, then you can refine it in Campaign Planning."
+    ].join("\n\n");
+  }
+  if (/\b(rollout|ops|operation|publish|launch owner)\b/.test(text)) {
+    return [
+      "For rollout work, use Rollout once the plan and content direction are clear enough to prepare launch readiness.",
+      "You can inspect connector needs, publish manifests, UTM checks, paid-media QA, and launch readiness status without triggering any live publish action."
+    ].join("\n\n");
+  }
+  return undefined;
 }
 
 export function isHomeCampaignCreationIntent(prompt: string): boolean {
@@ -1275,6 +1561,41 @@ function normalizeMessageText(text: string) {
 function extractProductMention(prompt: string) {
   const match = prompt.match(/\b(TE\d{2}(?:-\d{2})?|TE\s?\d{2}(?:\s?AVR)?|SIW\s?6AT-A22|[A-Z]{2,5}\d{1,3}(?:-\d{1,3})?)\b/i);
   return match?.[1]?.replace(/\s+/g, " ").toUpperCase();
+}
+
+function extractCampaignSubject(prompt: string) {
+  const match = prompt.match(/\bcampaign\s+(?:for|about|around|of)\s+([^,.:\n]+)/i) || prompt.match(/\bfor\s+([^,.:\n]+?)(?:,\s*the products|\s+campaign|\s+that|\s+it should|$)/i);
+  return cleanCampaignSubject(match?.[1]);
+}
+
+function extractSourceUrls(prompt: string) {
+  return Array.from(prompt.matchAll(/https?:\/\/[^\s,]+/gi)).map((match) => match[0].replace(/[).]+$/, ""));
+}
+
+function stripUrls(value: string) {
+  return value.replace(/https?:\/\/\S+/gi, " ");
+}
+
+function inferHomeBriefChannels(prompt: string) {
+  const text = prompt.toLowerCase();
+  const channels = [
+    text.includes("email") ? "Email" : undefined,
+    text.includes("paid") || text.includes("linkedin") || text.includes("google") || text.includes("meta") ? "Paid Media" : undefined,
+    text.includes("social") || text.includes("sprinklr") ? "Organic/HN" : undefined,
+    text.includes("contentful") || text.includes("landing") || text.includes("website") || text.includes("promo") ? "HOL Landing Page" : undefined
+  ].filter(Boolean);
+  return channels.length ? channels.join(", ") : "Paid Media, Email, HOL Landing Page, Organic/HN, and localized campaign assets";
+}
+
+function cleanCampaignSubject(subject?: string) {
+  const cleaned = subject
+    ?.replace(/https?:\/\/\S+/gi, "")
+    .replace(/\b(the products? you can check here|products? you can check here)\b/gi, "")
+    .replace(/\bit should\b[\s\S]*$/i, "")
+    .replace(/\s+/g, " ")
+    .replace(/[,.:\-]+$/g, "")
+    .trim();
+  return cleaned || undefined;
 }
 
 function routeIntent(text: string): AppView | undefined {
@@ -1432,10 +1753,10 @@ export function draftWorkspaceAgentAnswer(view: AppView, question: string, conte
   const gate = context.current_gate;
   const trimmedQuestion = question.trim();
   if (view === "campaign-planning") {
-    return `Campaign Planning Panda: I am using the shared campaign context for ${context.campaign_name}. For ${gate}, I will check objective, audience, channels, KPIs, budget, risks, and missing H1 inputs. Your question was: "${trimmedQuestion}". DeepSeek is refining this answer in the background.`;
+    return `Campaign Planning Panda: I am using the shared campaign context for ${context.campaign_name}. I will check objective, audience, channels, KPIs, budget, risks, and missing inputs for your question: "${trimmedQuestion}". DeepSeek is refining this answer in the background.`;
   }
   if (view === "content-planning") {
-    return `Content Planning Panda: I see ${context.content_requirements.length} requirements from the H1 plan for ${gate}. I will check channel, locale, Figma mapping, compliance, and rollout target coverage for your question: "${trimmedQuestion}". DeepSeek is refining this answer in the background.`;
+    return `Content Planning Panda: I see ${context.content_requirements.length} requirements from the campaign plan for ${gate}. I will check channel, locale, Figma mapping, compliance, and rollout target coverage for your question: "${trimmedQuestion}". DeepSeek is refining this answer in the background.`;
   }
   if (view === "content") {
     const blocked = context.content_objects.filter((item) => item.status === "blocked").length;
@@ -1453,18 +1774,38 @@ export function draftWorkspaceAgentAnswer(view: AppView, question: string, conte
 
 export function draftSpecialistAgentResponse(view: AppView, question: string, context: PandaContextPacket): SpecialistAgentResponse {
   if (view === "campaign-planning") {
+    const deliverablePatch = campaignPlanningDeliverablePatchFromInstruction(context.campaign_plan, context.planning_objects, question);
+    if (deliverablePatch) {
+      const deliverable = campaignPlanningDeliverables(context.campaign_plan).find((item) => item.id === deliverablePatch.id);
+      const title = deliverablePatch.id === "marcom-plan" ? "Campaign plan" : deliverable?.title ?? "campaign artifact";
+      return {
+        answer: `Campaign Planning Panda created ${title} for ${context.campaign_name}. I updated the artifact with the latest objective, audience, KPIs, budget, timeline, and channel handoff content. No approval was taken yet.`,
+        updates: [deliverablePatch],
+        suggested_actions: ["Open artifact", "Ask Panda to revise the plan", "Prepare approval when objects are ready"],
+        route: "campaign-planning"
+      };
+    }
     const updates = planningUpdatesFromInstruction(context.planning_objects, question);
     const changedTitles = updates.map((update) => context.planning_objects.find((item) => item.id === update.id)?.title || update.id);
     return {
       answer: changedTitles.length
-        ? `Campaign Planning Panda updated the H1 plan draft for ${context.campaign_name}: ${changedTitles.join(", ")}. No approval was taken; this is a planning revision for review.`
-        : `Campaign Planning Panda is staying in H1 plan editing mode for ${context.campaign_name}. I can revise objective, audience, KPIs, budget, channels, risks, and missing inputs without approving the gate.`,
+        ? `Campaign Planning Panda updated the plan draft for ${context.campaign_name}: ${changedTitles.join(", ")}. No approval was taken; this is a planning revision for review.`
+        : `Campaign Planning Panda is staying in plan editing mode for ${context.campaign_name}. I can revise objective, audience, KPIs, budget, channels, risks, and missing inputs without approving the plan.`,
       updates,
-      suggested_actions: ["Review H1 plan changes", "Ask Panda to revise another planning object", "Prepare H1 packet when ready"],
+      suggested_actions: ["Review plan changes", "Ask Panda to revise another planning object", "Prepare approval when ready"],
       route: "campaign-planning"
     };
   }
   if (view === "content-planning") {
+    const deliverablePatch = contentPlanningDeliverablePatchFromInstruction(context.campaign_plan, question);
+    if (deliverablePatch) {
+      return {
+        answer: `Content Planning Panda created CP1 creative concept for ${context.campaign_name}. I updated the CP1 artifact with the big idea, key message, visual direction, channel adaptation, and approval ask. No H2 approval was taken yet.`,
+        updates: [deliverablePatch],
+        suggested_actions: ["Review CP1 artifact", "Ask Panda to revise the creative concept", "Approve CP1 object when ready"],
+        route: "content-planning"
+      };
+    }
     const updatedRequirements = applyContentPlanningInstruction(context.content_requirements as ContentRequirement[], context.campaign_plan, question);
     const changed = updatedRequirements !== context.content_requirements;
     return {
@@ -1755,7 +2096,7 @@ export function campaignPlanningObjectsFromPlan(plan: CampaignPlan): PlanningWor
       "Campaign Owner",
       "in-review",
       `Launch ${plan.name} around ${plan.heroProduct} for ${plan.markets.join(", ")}.`,
-      ["Brief intake", "H1 Campaign Plan"]
+      ["Brief intake", "Campaign plan"]
     ),
     planningObject(
       "target-audience",
@@ -1821,6 +2162,240 @@ export function campaignPlanningObjectsFromPlan(plan: CampaignPlan): PlanningWor
       ["Panda gap scan", "RMB output checklist"]
     )
   ];
+}
+
+export function campaignPlanningDeliverables(plan: CampaignPlan): RmbDeliverable[] {
+  const channelNames = plan.channels.map((channel) => channel.name).join(", ");
+  const paidMedia = plan.channels.find((channel) => channel.name === "Paid Media");
+  const email = plan.channels.find((channel) => channel.name === "Email");
+  const hol = plan.channels.find((channel) => channel.name === "HOL Landing Page");
+  const organic = plan.channels.find((channel) => channel.name === "Organic / HN");
+
+  return withRmbDeliverableDefaults([
+    {
+      id: "marcom-plan",
+      title: "MarCom Planning Packet",
+      workspace: "Campaign Planning",
+      gate: "H1",
+      owner: "Campaign Owner",
+      requestedBy: "Campaign Planning Owner: Erin Shier",
+      outputFormats: ["PPTX"],
+      sections: ["Campaign theme", "Objective and KPIs", "Hero product", "Offer", "Audience", "Timeline", "Channel overview"],
+      summary: `${campaignThemeForPlan(plan)} H1 MarCom packet with ${plan.audience.join(" / ")} audience, ${plan.budget} budget, and ${plan.channels.length} channels.`,
+      previewItems: [
+        campaignThemeForPlan(plan),
+        `Audience: ${plan.audience.join(" / ")}`,
+        `Channels: ${channelNames}`
+      ],
+      sourceInputs: ["Campaign objectives", "Hero products"],
+      handoffTarget: "Content Planning",
+      approvalLevel: "gate",
+      status: "in-review",
+      artifactDetails: [
+        { label: "Campaign theme", value: campaignThemeForPlan(plan) },
+        { label: "Objective and KPIs", value: `Objective: create qualified demand and measurable downstream action. KPIs: ${plan.kpis.join(", ")}.` },
+        { label: "Hero product", value: plan.heroProduct },
+        { label: "Offer", value: "Offer or promotion mechanic requires Campaign Owner confirmation before H1 approval." },
+        { label: "Audience", value: plan.audience.join(" / ") },
+        { label: "Timeline", value: plan.timeline },
+        { label: "Channel overview", value: plan.channels.map((channel) => `${channel.name} -> ${channel.rolloutTarget}`).join("; ") }
+      ],
+      discussionNotes: [
+        `Panda assembled the H1 MarCom packet from the active ${plan.name} campaign context.`,
+        "This artifact is the source of handoff for Content Planning and should capture leadership revisions before H1 approval."
+      ],
+      workspaceAction: "Review H1 MarCom packet, ask Panda for revisions, then prepare the H1 gate decision"
+    },
+    {
+      id: "paid-media-plan",
+      title: "Paid Media Strategy / Media Plan",
+      workspace: "Campaign Planning",
+      gate: "H1",
+      owner: "Paid Media",
+      requestedBy: "RMB paid media strategy team",
+      outputFormats: ["Excel", "PPTX"],
+      sections: ["Platform mix", "Campaign/ad structure", "Audiences", "Keywords", "Budget split", "Projected KPIs", "Asset strategy", "Testing roadmap"],
+      summary: paidMedia
+        ? `Paid media plan for ${plan.heroProduct}: ${paidMedia.requiredAssets.length} asset types, budget split, KPI benchmarks, audience logic, and testing roadmap.`
+        : "Paid media is not selected in the active H1 plan.",
+      previewItems: [
+        paidMedia ? `${paidMedia.requiredAssets.length} paid-media asset types scoped` : "Paid-media channel not selected",
+        `${plan.budget} to split by platform, campaign, and ad type`,
+        "Benchmarks: CTR, ROAS, conversion rate, CPM"
+      ],
+      sourceInputs: ["MarCom plan", "CRM/LAL/GA4 audience data", "Power BI benchmarks", "Paid Media Advisor"],
+      handoffTarget: "Content Planning",
+      approvalLevel: "object-and-final",
+      status: paidMedia ? "draft" : "blocked",
+      artifactDetails: [
+        { label: "Platform mix", value: paidMedia ? "LinkedIn, Meta, Google Search, and retargeting are candidate lanes for validation." : "Paid media channel not selected." },
+        { label: "Campaign/ad structure", value: paidMedia ? paidMedia.requiredAssets.join(", ") : "No paid media assets scoped." },
+        { label: "Audiences", value: plan.audience.join(" / ") },
+        { label: "Budget split", value: `${plan.budget}; split by channel, funnel stage, and market after benchmarks are confirmed.` },
+        { label: "Projected KPIs", value: plan.kpis.join(", ") },
+        { label: "Testing roadmap", value: "Test proof-point angle, CTA, market variant, and audience segment before scaling." }
+      ]
+    },
+    {
+      id: "hol-journey-map",
+      title: "HOL Customer Journey Map",
+      workspace: "Campaign Planning",
+      gate: "H1",
+      owner: "HOL",
+      requestedBy: "RMB HOL team",
+      outputFormats: ["Excel", "PPTX"],
+      sections: ["Entry paths", "Touchpoints", "Landing pages", "Banners", "Required UX assets", "Direct-entry journey"],
+      summary: hol
+        ? `HOL journey map for ${plan.heroProduct}: channel entry paths, Contentful landing page needs, banner touchpoints, and direct-entry journey.`
+        : "HOL landing page is not selected in the active H1 plan.",
+      previewItems: [
+        hol ? `${hol.requiredAssets.join(", ")} planned for Contentful` : "HOL landing page not selected",
+        "Map campaign-channel entry and direct website entry",
+        "Identify LP/banner assets needed for optimal UX"
+      ],
+      sourceInputs: ["MarCom plan", "HOL website map", "HOL UX advisor"],
+      handoffTarget: "Content Planning",
+      approvalLevel: "object-and-final",
+      status: hol ? "draft" : "blocked",
+      artifactDetails: [
+        { label: "Entry paths", value: "Paid media, organic/HN, email, and direct web entry should resolve into one coherent journey." },
+        { label: "Landing pages", value: hol ? hol.requiredAssets.join(", ") : "No HOL landing page assets scoped." },
+        { label: "Required UX assets", value: "Hero module, proof section, CTA module, banner placements, and market/localized copy slots." },
+        { label: "Contentful handoff", value: "Content Planning must carry page module requirements and evidence into Contentful build." }
+      ]
+    },
+    {
+      id: "email-ta-brief",
+      title: "Email Strategy & TA Brief",
+      workspace: "Campaign Planning",
+      gate: "H1",
+      owner: "Email TA",
+      requestedBy: "RMB email strategy team",
+      outputFormats: ["PPTX", "Excel"],
+      sections: ["Segments", "Email count", "Sequence", "Journey role", "Messaging strategy", "Testing plan"],
+      summary: email
+        ? `Email TA brief for ${plan.heroProduct}: segments, journey role, email modules, message sequence, and SFMC assumptions.`
+        : "Email is not selected in the active H1 plan.",
+      previewItems: [
+        email ? `${email.requiredAssets.length} email modules scoped` : "Email channel not selected",
+        "Define Awareness / Consideration / Conversion role per email",
+        "Prepare SFMC audience and testing assumptions"
+      ],
+      sourceInputs: ["MarCom plan", "Email templates", "SFMC audience data", "Email advisor"],
+      handoffTarget: "Content Planning",
+      approvalLevel: "object-and-final",
+      status: email ? "draft" : "blocked",
+      artifactDetails: [
+        { label: "Segments", value: plan.audience.join(" / ") },
+        { label: "Email count", value: email ? `${email.requiredAssets.length} modules or emails scoped from H1.` : "No email assets scoped." },
+        { label: "Sequence", value: "Awareness proof, consideration detail, and conversion CTA sequence to be confirmed with Email TA." },
+        { label: "Testing plan", value: "Subject line, CTA, proof point, and audience segment tests are proposed before rollout." }
+      ]
+    },
+    {
+      id: "organic-hn-strategy",
+      title: "Organic Social & Hilti Network Strategy",
+      workspace: "Campaign Planning",
+      gate: "H1",
+      owner: "Content / Creative",
+      requestedBy: "RMB organic/HN team",
+      outputFormats: ["PPTX", "Excel"],
+      sections: ["Campaign story", "Owned social", "Hilti Network", "Asset list", "Formats", "Dimensions"],
+      summary: organic
+        ? `Organic/HN strategy for ${plan.heroProduct}: campaign story, owned social role, HN role, formats, and dimensions.`
+        : "Organic/HN is not selected in the active H1 plan.",
+      previewItems: [
+        organic ? `${organic.requiredAssets.join(", ")} scoped for Sprinklr/HN` : "Organic/HN not selected",
+        "Separate Hilti owned-channel and Hilti Network narrative needs",
+        "Carry format and dimension requirements into content planning"
+      ],
+      sourceInputs: ["MarCom plan", "Organic/HN advisor", "Audience and product narrative"],
+      handoffTarget: "Content Planning",
+      approvalLevel: "object-and-final",
+      status: organic ? "draft" : "blocked",
+      artifactDetails: [
+        { label: "Campaign story", value: `${plan.heroProduct} story adapted for owned social and Hilti Network without overclaiming performance.` },
+        { label: "Owned social", value: organic ? "Sprinklr-ready post/message requirements are in scope." : "Owned social assets not scoped." },
+        { label: "Hilti Network", value: "HN should carry peer/contractor story and local proof rather than paid-media copy lifted directly." },
+        { label: "Formats and dimensions", value: organic ? organic.requiredAssets.join(", ") : "No formats scoped." }
+      ]
+    }
+  ]);
+}
+
+function planningObjectValue(objects: Array<Pick<PlanningWorkObject, "id" | "copy">>, id: string, fallback: string) {
+  return objects.find((item) => item.id === id)?.copy ?? fallback;
+}
+
+function campaignPlanningDeliverableIdFromInstruction(instruction: string): RmbDeliverable["id"] | undefined {
+  const normalized = instruction.toLowerCase();
+  if (/\bmarcom\b/.test(normalized) || /\bh1\b/.test(normalized) || normalized.includes("planning packet")) return "marcom-plan";
+  if (normalized.includes("paid media") || normalized.includes("media plan")) return "paid-media-plan";
+  if (normalized.includes("hol") || normalized.includes("journey")) return "hol-journey-map";
+  if (normalized.includes("email") || normalized.includes("ta brief")) return "email-ta-brief";
+  if (normalized.includes("organic") || normalized.includes("hilti network") || /\bhn\b/.test(normalized)) return "organic-hn-strategy";
+  return undefined;
+}
+
+export function campaignPlanningDeliverablePatchFromInstruction(
+  plan: CampaignPlan,
+  objects: Array<Pick<PlanningWorkObject, "id" | "copy">>,
+  instruction: string
+): Extract<SpecialistAgentUpdate, { target: "rmb_deliverable" }> | undefined {
+  const normalized = instruction.toLowerCase();
+  const asksToCreate = /\b(create|build|draft|make|revise|update|prepare)\b/.test(normalized);
+  const id = campaignPlanningDeliverableIdFromInstruction(instruction);
+  if (!id || !asksToCreate) return undefined;
+
+  const deliverable = campaignPlanningDeliverables(plan).find((item) => item.id === id);
+  if (!deliverable) return undefined;
+
+  const hero = plan.heroProduct;
+  const objective = planningObjectValue(objects, "campaign-objective", `Create qualified demand for ${hero}.`);
+  const audience = planningObjectValue(objects, "target-audience", plan.audience.join(" / "));
+  const channel = planningObjectValue(objects, "channel-strategy", plan.channels.map((item) => item.name).join(", "));
+  const kpis = planningObjectValue(objects, "kpi-definition", plan.kpis.join(", "));
+  const budget = planningObjectValue(objects, "budget-allocation", plan.budget);
+  const timeline = planningObjectValue(objects, "campaign-timeline", plan.timeline);
+
+  const artifactDetails =
+    id === "marcom-plan"
+      ? [
+          { label: "Campaign theme", value: campaignThemeForPlan(plan) },
+          { label: "Objective and KPIs", value: `${objective} KPIs: ${kpis}` },
+          { label: "Audience", value: audience },
+          { label: "Offer", value: "Confirm offer/promotion mechanism with Campaign Owner before final H1 approval." },
+          { label: "Budget and timeline", value: `${budget} ${timeline}` },
+          { label: "Channel overview", value: channel }
+        ]
+      : deliverable.artifactDetails.map((detail) => {
+          if (detail.label === "Projected KPIs") return { ...detail, value: kpis };
+          if (detail.label === "Budget split") return { ...detail, value: budget };
+          if (detail.label === "Audiences" || detail.label === "Segments") return { ...detail, value: audience };
+          return detail;
+        });
+
+  const artifactName = id === "marcom-plan" ? "H1 MarCom Planning Packet" : deliverable.title;
+  const previewName = id === "marcom-plan" ? "H1 MarCom plan" : artifactName;
+  return {
+    target: "rmb_deliverable",
+    id,
+      patch: {
+      summary: `${artifactName} created from active H1 plan, latest planning objects, and Panda/user discussion for ${hero}. Theme: ${campaignThemeForPlan(plan)}`,
+      status: "in-review",
+      previewItems: [
+        campaignThemeForPlan(plan),
+        `${plan.markets.join(", ")} · ${plan.audience.join(" / ")}`,
+        `Handoff: ${deliverable.handoffTarget}`
+      ],
+      artifactDetails,
+      discussionNotes: [
+        `Panda created ${artifactName} from the active ${plan.name} plan and latest Campaign Planning conversation.`,
+        "This artifact can now be revised by asking Campaign Planning Panda for specific objective, audience, KPI, channel, budget, or timeline changes."
+      ],
+      workspaceAction: `Review ${artifactName}, revise with Campaign Planning Panda, then include it in the H1 gate packet`
+    }
+  };
 }
 
 export function campaignPlanningReadiness(objects: PlanningWorkObject[]): PlanningReadiness {
@@ -1911,9 +2486,47 @@ function planningUpdatesFromInstruction(objects: Array<Pick<PlanningWorkObject, 
   const objectiveMatch = text.match(/campaign objective\s*:\s*([^.;\n]+)/i);
   const kpiMatch = text.match(/\bkpi\s*:\s*([^.;\n]+)/i);
   const mentionsChannelStrategy = /\bchannel\s+st(?:r)?ategy\b|\bchannel strategy\b/i.test(text);
-  if (!wantsUpdate && !product && !mentionsMocn && !objectiveMatch && !kpiMatch && !mentionsChannelStrategy) return [];
+  const draftsRemainingH1 = /\bdraft\b/.test(normalized) && /\b(remaining|rest)\b/.test(normalized) && /\bh1\b/.test(normalized);
+  if (!wantsUpdate && !product && !mentionsMocn && !objectiveMatch && !kpiMatch && !mentionsChannelStrategy && !draftsRemainingH1) return [];
 
   const updates: Extract<SpecialistAgentUpdate, { target: "planning_object" }>[] = [];
+
+  if (draftsRemainingH1) {
+    const draftPatches: Record<string, { status: WorkObjectStatus; copy: string; evidence: string[] }> = {
+      "channel-strategy": {
+        status: "in-review",
+        copy: "Draft H1 channel strategy: use Paid Media, Email, HOL Landing Page, Organic/HN, and Banner as coordinated workstreams. Paid Media creates demand, Email and HOL convert, Organic/HN supports credibility, and Banner reinforces the landing journey.",
+        evidence: ["Home Panda continuation", "Campaign Planning Panda H1 draft"]
+      },
+      "budget-allocation": {
+        status: "in-review",
+        copy: "Draft H1 budget allocation: keep the current campaign budget as the envelope, prioritize paid media and landing-page conversion paths first, reserve test budget for CTA/proof-point variants, and confirm final split with Campaign Owner and Paid Media before H1 approval.",
+        evidence: ["Home Panda continuation", "Budget allocation draft"]
+      },
+      "campaign-timeline": {
+        status: "in-review",
+        copy: "Draft H1 timeline: complete H1 planning review, hand CP1-CP4 requirements into Content Planning, complete H2 content/QA approvals, prepare rollout manifests and connector QA for H3, then move to H4 insight review after live performance evidence is available.",
+        evidence: ["Home Panda continuation", "Campaign timeline draft"]
+      },
+      "assumptions-risks": {
+        status: "in-review",
+        copy: "Draft H1 assumptions and risks: legal claim evidence, market/localization fit, final budget split, connector access, and approver availability must be confirmed before gate signoff or rollout readiness.",
+        evidence: ["Home Panda continuation", "Risk register draft"]
+      },
+      "missing-inputs": {
+        status: "in-review",
+        copy: "Draft missing-inputs register with owners: Campaign Owner confirms offer, budget, timing, and decision owner; Paid Media confirms benchmarks and channel split; Legal / Compliance confirms claims evidence; Content / Creative confirms brand playbook and Figma inputs; Rollout owners confirm connector access.",
+        evidence: ["Home Panda continuation", "Missing inputs assigned to owners"]
+      }
+    };
+    for (const item of objects) {
+      const patch = draftPatches[item.id];
+      if (!patch) continue;
+      updates.push({ target: "planning_object", id: item.id, patch });
+    }
+    return updates;
+  }
+
   const objective = objects.find((item) => item.id === "campaign-objective");
   if (objective && (product || objectiveMatch || (wantsUpdate && normalized.includes("objective")))) {
     updates.push({
@@ -2021,6 +2634,60 @@ export function applyContentPlanningInstruction(requirements: ContentRequirement
   ];
 }
 
+export function contentPlanningDeliverablePatchFromInstruction(
+  plan: CampaignPlan,
+  instruction: string
+): Extract<SpecialistAgentUpdate, { target: "rmb_deliverable" }> | undefined {
+  const normalized = instruction.toLowerCase();
+  const asksForCp1 = /\bcp1\b/.test(normalized) || normalized.includes("creative concept") || normalized.includes("creative concept");
+  const asksToAct = /\b(create|build|draft|make|revise|update|refine|rework)\b/.test(normalized);
+  if (!asksForCp1 || !asksToAct) return undefined;
+
+  const hero = titleCase(plan.heroProduct);
+  const primaryAudience = plan.audience[0] || "target buyers";
+  const markets = plan.markets.join(", ");
+  const bigIdea = campaignThemeHeadline(plan.heroProduct);
+  return {
+    target: "rmb_deliverable",
+    id: "cp1-creative-concept",
+    patch: {
+      status: "in-review",
+      previewItems: [
+        `${bigIdea} for ${primaryAudience}`,
+        `Campaign markets: ${markets}`,
+        "Ready for CP1 object review before H2"
+      ],
+      artifactDetails: [
+        {
+          label: "Big idea",
+          value: `${bigIdea} positions the campaign around jobsite confidence, fewer reworks, and a clear next step to HOL or sales contact.`
+        },
+        {
+          label: "Key message",
+          value: `${hero} helps ${primaryAudience} move faster on demanding jobs with proof-led Hilti reliability.`
+        },
+        {
+          label: "Visual direction",
+          value: "Use real jobsite texture, close product-in-use crops, Hilti red CTA panels, and one proof point per frame."
+        },
+        {
+          label: "Channel adaptation",
+          value: `Carry the idea into ${plan.channels.map((channel) => channel.name).join(", ")} with format-specific copy and compliance evidence.`
+        },
+        {
+          label: "Approval ask",
+          value: "Approve CP1 creative direction or request revision before CP2 requirements and CP4 Figma mapping are finalized."
+        }
+      ],
+      discussionNotes: [
+        `Panda created CP1 from the active ${plan.name} H1 plan, audience, channels, and H2 content requirements.`,
+        "This is a working creative concept artifact, not only a preview/download card."
+      ],
+      workspaceAction: "Review CP1 creative concept, revise with Panda, then approve the object for H2"
+    }
+  };
+}
+
 export function buildContentPlanningBridge(plan: CampaignPlan, requirements: ContentRequirement[]): ContentPlanningBridge {
   const channels = Array.from(new Set(requirements.map((item) => item.channel)));
   const hero = plan.heroProduct;
@@ -2029,7 +2696,7 @@ export function buildContentPlanningBridge(plan: CampaignPlan, requirements: Con
       storyId: "CP1",
       title: "Creative Concept",
       status: "in-review",
-      head: `${hero} helps ${plan.audience[0] || "the target audience"} reduce friction with measurable jobsite confidence.`,
+      head: campaignThemeHeadline(hero),
       heart: "Confident, direct, proof-led Hilti red system energy with real jobsite texture rather than generic product glamour.",
       hands: `Show ${hero} in use: fewer reworks, faster decisions, clear next step to HOL or sales contact.`,
       proofPoints: ["Jobsite reliability", "Clear ROI argument", "Human-gated claims and compliance"],
@@ -2079,6 +2746,102 @@ export function buildContentPlanningBridge(plan: CampaignPlan, requirements: Con
   };
 }
 
+export function contentPlanningDeliverables(plan: CampaignPlan, requirements: ContentRequirement[]): RmbDeliverable[] {
+  const bridge = buildContentPlanningBridge(plan, requirements);
+  const channels = Array.from(new Set(requirements.map((item) => item.channel)));
+  const locales = Array.from(new Set(requirements.map((item) => item.locale))).filter((locale) => locale !== "master");
+  return withRmbDeliverableDefaults([
+    {
+      id: "cp1-creative-concept",
+      title: "CP1 Creative Concept",
+      workspace: "Content Planning",
+      gate: "H2",
+      owner: "Content / Creative",
+      requestedBy: "RMB content development team",
+      outputFormats: ["PPTX", "Figma mock"],
+      sections: ["Creative concept", "Messaging brief", "Visual direction", "Proof points", "Objective-level approval"],
+      previewItems: [
+        `${campaignThemeHeadline(plan.heroProduct)} for ${plan.audience[0] || "target audience"}`,
+        "Head / heart / hands narrative",
+        "Proof-led visual directions ready for review"
+      ],
+      sourceInputs: ["H1 campaign plan", "Paid media strategy", "Organic/HN strategy", "Brand playbook"],
+      handoffTarget: "Content",
+      approvalLevel: "object-and-final",
+      status: "in-review",
+      artifactDetails: [
+        { label: "Head", value: bridge.creativeConcept.head },
+        { label: "Heart", value: bridge.creativeConcept.heart },
+        { label: "Hands", value: bridge.creativeConcept.hands },
+        { label: "Proof points", value: bridge.creativeConcept.proofPoints.join("; ") },
+        { label: "Visual direction", value: bridge.creativeConcept.visualDirections.join("; ") }
+      ],
+      discussionNotes: [
+        "Panda shaped this CP1 package from the active H1 plan, audience, channels, and brand evidence.",
+        "Approval should happen at CP1 object level before the final H2 gate."
+      ],
+      workspaceAction: "Open CP1 detail and revise creative concept"
+    },
+    {
+      id: "cp2-requirements-matrix",
+      title: "CP2 Cross-Channel Requirements Matrix",
+      workspace: "Content Planning",
+      gate: "H2",
+      owner: "Content / Creative",
+      requestedBy: "RMB content operations",
+      outputFormats: ["Excel"],
+      sections: ["Channel", "Asset type", "Locale", "Owner", "Rollout target", "Compliance evidence"],
+      previewItems: [
+        `${requirements.length} content requirements`,
+        `${channels.length} channels: ${channels.join(", ")}`,
+        `${locales.length || 1} locale scope`
+      ],
+      sourceInputs: ["H1 plan", "Content scope", "Paid media/HOL/email/organic strategies"],
+      handoffTarget: "Content",
+      approvalLevel: "object-and-final",
+      status: "in-review"
+    },
+    {
+      id: "cp3-storyboard",
+      title: "CP3 Storyboard Package",
+      workspace: "Content Planning",
+      gate: "H2",
+      owner: "Content / Creative",
+      requestedBy: "RMB creative team",
+      outputFormats: ["PPTX", "Figma mock"],
+      sections: ["Frames", "Scripts", "Shot list", "Production plan", "Channel adaptation"],
+      previewItems: [
+        `${channels.length} channel storyboard lanes`,
+        "Script and shot-list scaffold",
+        "Production notes for copy, image, video, and compliance"
+      ],
+      sourceInputs: ["Creative concept", "Requirements matrix", "Figma placeholders"],
+      handoffTarget: "Content",
+      approvalLevel: "object-and-final",
+      status: "draft"
+    },
+    {
+      id: "cp4-figma-mapping",
+      title: "CP4 Figma Board Mapping",
+      workspace: "Content Planning",
+      gate: "H2",
+      owner: "Content / Creative",
+      requestedBy: "RMB Figma mapping team",
+      outputFormats: ["Figma mock", "Mapping table"],
+      sections: ["Figma frames", "Placeholders", "Asset scope", "Format ratios", "Content object links"],
+      previewItems: [
+        `${channels.length} Figma frame groups`,
+        `${requirements.length} placeholders mapped to production objects`,
+        "Create Figma Mapping link/button remains prototype-safe"
+      ],
+      sourceInputs: ["Content requirement matrix", "Figma template/layouts", "Channel asset scope"],
+      handoffTarget: "Content",
+      approvalLevel: "object-and-final",
+      status: "draft"
+    }
+  ]);
+}
+
 export function contentPlanningBridgeReadiness(bridge: ContentPlanningBridge): ContentPlanningBridgeReadiness {
   const packages = [bridge.creativeConcept, bridge.requirements, bridge.storyboard, bridge.figmaBoard];
   const approved = packages.filter((item) => item.status === "approved").length;
@@ -2120,7 +2883,7 @@ export function buildPlanPreviewSlides(view: Extract<AppView, "campaign-planning
     {
       kicker: "H1 leadership preview",
       title: plan.name,
-      bullets: [`Hero product: ${plan.heroProduct}`, `Markets: ${plan.markets.join(", ")}`, `Budget: ${plan.budget}`]
+      bullets: [`Campaign theme: ${campaignThemeForPlan(plan)}`, `Markets: ${plan.markets.join(", ")}`, `Budget: ${plan.budget}`]
     },
     {
       kicker: "Campaign strategy",
@@ -2232,6 +2995,169 @@ export function createContentWorkObjectsFromRequirements(requirements: ContentRe
         : ["Comment", "Edit", "Ask AI to revise", "Approve", "Request revision", "Flag compliance", "Attach evidence"]
     };
   });
+}
+
+export function contentCreationDeliverables(objects: ContentWorkObject[]): RmbDeliverable[] {
+  const countByChannel = (channel: ContentWorkObject["channel"]) => objects.filter((item) => item.channel === channel).length;
+  const detailsForChannels = (channels: ContentWorkObject["channel"][]) =>
+    objects
+      .filter((item) => channels.includes(item.channel))
+      .slice(0, 5)
+      .map((item) => ({ label: item.title, value: `${item.type}: ${item.copy}` }));
+  const notesForChannels = (channels: ContentWorkObject["channel"][]) =>
+    objects
+      .filter((item) => channels.includes(item.channel))
+      .flatMap((item) => item.evidence)
+      .filter((value, index, list) => list.indexOf(value) === index)
+      .slice(0, 4)
+      .map((evidence) => `Uses ${evidence}`);
+  const paidCount = countByChannel("Paid Media");
+  const organicCount = countByChannel("Organic / HN");
+  const landingCount = countByChannel("HOL Landing Page") + countByChannel("Banner");
+  const emailCount = countByChannel("Email");
+  const claimCount = countByChannel("Claims");
+  const commonSources = ["Content Planning matrix", "Creative concept", "Figma placeholders"];
+
+  return withRmbDeliverableDefaults([
+    {
+      id: "paid-media-copy",
+      title: "Paid Media Copy Package",
+      workspace: "Content",
+      gate: "H2",
+      owner: "Paid Media",
+      requestedBy: "RMB paid media copy team",
+      outputFormats: ["Figma board", "Excel"],
+      sections: ["Post copy", "On-asset copy", "Ad formats", "Audience fit", "Claims evidence"],
+      previewItems: [`${paidCount} paid-media content objects`, "Copywriter-ready Figma placeholder scope", "Per-format copy revision and approval"],
+      sourceInputs: [...commonSources, "Paid media strategy"],
+      handoffTarget: "Rollout",
+      approvalLevel: "object-and-final",
+      status: paidCount ? "in-review" : "blocked",
+      artifactDetails: detailsForChannels(["Paid Media"]),
+      discussionNotes: notesForChannels(["Paid Media"]),
+      workspaceAction: "Open paid media copy objects"
+    },
+    {
+      id: "organic-hn-content",
+      title: "Organic Social / Hilti Network Content",
+      workspace: "Content",
+      gate: "H2",
+      owner: "Content / Creative",
+      requestedBy: "RMB organic/HN content team",
+      outputFormats: ["Figma board", "Excel"],
+      sections: ["Owned social copy", "HN copy", "Creative concept", "Format", "Dimensions"],
+      previewItems: [`${organicCount} organic/HN content objects`, "Owned vs Hilti Network nuance", "Sprinklr/HN-ready asset plan"],
+      sourceInputs: [...commonSources, "Organic/HN strategy"],
+      handoffTarget: "Rollout",
+      approvalLevel: "object-and-final",
+      status: organicCount ? "draft" : "blocked"
+    },
+    {
+      id: "landing-page-mockup",
+      title: "Landing Page Copy & Mockup",
+      workspace: "Content",
+      gate: "H2",
+      owner: "HOL",
+      requestedBy: "RMB landing page team",
+      outputFormats: ["Figma mock", "Contentful preview"],
+      sections: ["LP copy", "Template sections", "Image/graphic needs", "UX journey fit", "Contentful rebuild notes"],
+      previewItems: [`${landingCount} HOL/banner objects`, "Figma layout source carried to Contentful", "LP and banner evidence before rollout"],
+      sourceInputs: [...commonSources, "HOL journey map", "Landing page layout"],
+      handoffTarget: "Rollout",
+      approvalLevel: "object-and-final",
+      status: landingCount ? "draft" : "blocked"
+    },
+    {
+      id: "email-copy",
+      title: "Email Copy & Mockup",
+      workspace: "Content",
+      gate: "H2",
+      owner: "Email TA",
+      requestedBy: "RMB email copy team",
+      outputFormats: ["Figma mock", "Excel"],
+      sections: ["Email copy", "Module role", "Messaging strategy", "Sequence fit", "Testing notes"],
+      previewItems: [`${emailCount} email content objects`, "Mockup-to-basefile path", "Journey role per email preserved"],
+      sourceInputs: [...commonSources, "Email strategy & TA brief", "Email templates"],
+      handoffTarget: "Rollout",
+      approvalLevel: "object-and-final",
+      status: emailCount ? "draft" : "blocked"
+    },
+    {
+      id: "email-basefile",
+      title: "Email Basefile Creator",
+      workspace: "Content",
+      gate: "H2",
+      owner: "Email TA",
+      requestedBy: "RMB content operations",
+      outputFormats: ["XLS"],
+      sections: ["Email modules", "Translation rows", "CTA/link fields", "Locale columns", "SFMC handoff"],
+      previewItems: [`${emailCount} email objects prepared for XLS basefile`, "Translation/production table preview", "SFMC build handoff after H2"],
+      sourceInputs: ["Email mockup", "Figma source", "Email copy package"],
+      handoffTarget: "Rollout",
+      approvalLevel: "object",
+      status: emailCount ? "draft" : "blocked"
+    },
+    {
+      id: "image-assets",
+      title: "Image Generation / Editing Package",
+      workspace: "Content",
+      gate: "H2",
+      owner: "Content / Creative",
+      requestedBy: "RMB image production team",
+      outputFormats: ["Asset manifest", "DAM package"],
+      sections: ["Image sources", "Photo/graphic edits", "CAD/3D inputs", "Usage evidence", "DAM readiness"],
+      previewItems: ["Photo, graphic, CAD, and 3D source list", "Image-editing status per asset", "DAM package remains mocked"],
+      sourceInputs: [...commonSources, "Photographer images", "CAD/3D files"],
+      handoffTarget: "DAM / Compliance",
+      approvalLevel: "object",
+      status: "draft"
+    },
+    {
+      id: "video-assets",
+      title: "Video Generation / Editing Package",
+      workspace: "Content",
+      gate: "H2",
+      owner: "Content / Creative",
+      requestedBy: "RMB video production team",
+      outputFormats: ["Asset manifest", "DAM package"],
+      sections: ["Storyboards", "Scripts", "Source videos", "Format variants", "Agency handoff"],
+      previewItems: ["9:16, 16:9, 4:5, 1:1 video variant scope", "Scripts captured for later localization", "Agency/open-file handoff tracked"],
+      sourceInputs: [...commonSources, "Storyboards/scripts", "Agency video files", "CAD/3D files"],
+      handoffTarget: "Rollout",
+      approvalLevel: "object",
+      status: "draft"
+    },
+    {
+      id: "asset-formatting",
+      title: "Asset Formatting Matrix",
+      workspace: "Content",
+      gate: "H2",
+      owner: "Content / Creative",
+      requestedBy: "RMB design operations",
+      outputFormats: ["Excel", "Asset manifest"],
+      sections: ["1:1", "4:5", "9:16", "16:9", "Editable source", "DAM naming"],
+      previewItems: ["Static and video ratio matrix", "Format completion per channel", "Editable source files tracked before rollout"],
+      sourceInputs: ["Completed assets", "Figma placeholders", "Adobe editable formats"],
+      handoffTarget: "Rollout",
+      approvalLevel: "object",
+      status: "draft"
+    },
+    {
+      id: "compliance-report",
+      title: "Compliance Evidence Report",
+      workspace: "Content",
+      gate: "H2",
+      owner: "Legal / Compliance",
+      requestedBy: "RMYT / RMB compliance team",
+      outputFormats: ["Compliance report", "DAM package"],
+      sections: ["Brand rules", "Legal claims", "AI guidelines", "Ready for upload", "Non-compliant sample checks"],
+      previewItems: [`${claimCount} claim objects require compliance evidence`, "Dummy compliant/non-compliant assets can validate feasibility", "Future DAM-side agent path preserved"],
+      sourceInputs: ["Completed assets", "Brand guidelines", "Legal guidelines", "AI guidelines", "Dummy non-compliant assets"],
+      handoffTarget: "DAM / Compliance",
+      approvalLevel: "object-and-final",
+      status: claimCount ? "blocked" : "draft"
+    }
+  ]);
 }
 
 export function contentWorkspaceReadiness(objects: ContentWorkObject[]): ObjectWorkspaceReadiness {
@@ -2376,10 +3302,11 @@ function campaignPlanFromArtifact(run: CampaignRun): CampaignPlan | undefined {
 
 function campaignPlanFromBrief(run: CampaignRun): Pick<CampaignPlan, "heroProduct" | "markets" | "locales" | "audience" | "budget" | "channels"> {
   const requestedChannels = inferRequestedChannels(run.brief);
+  const markets = inferMarkets(run.brief);
   return {
     heroProduct: inferHeroProduct(run.brief),
-    markets: inferDelimitedList(run.brief, /markets?\s+([A-Z]{2}(?:\s*,\s*[A-Z]{2})*)/i, ["DE", "AT", "CH"]),
-    locales: inferDelimitedList(run.brief, /locales?\s+([a-z]{2}-[A-Z]{2}(?:\s*,\s*[a-z]{2}-[A-Z]{2})*)/i, ["de-DE", "de-AT", "de-CH", "fr-CH"]),
+    markets,
+    locales: inferLocales(run.brief, markets),
     audience: inferAudience(run.brief),
     budget: inferBudget(run.brief),
     channels: defaultPlanChannels().filter((channel) => requestedChannels.size === 0 || requestedChannels.has(channel.name))
@@ -2449,7 +3376,7 @@ function requirement(
     locale,
     owner,
     source: "Content Planning matrix",
-    evidence: ["H1 Campaign Plan", "Brand Playbook", plan.audience.includes("Contractors") ? "Audience / Persona Files" : "Campaign Brief"],
+    evidence: ["Campaign plan", "Brand Playbook", plan.audience.includes("Contractors") ? "Audience / Persona Files" : "Campaign Brief"],
     compliance: channel === "Claims" ? "Requires source-backed claim review before H2." : "Requires brand, tone, and locale fit check before H2.",
     rolloutTarget
   };
@@ -2513,6 +3440,11 @@ function normalizeChannels(value: unknown): CampaignPlanChannel[] {
   });
 }
 
+function channelsFromHomeDraft(channels: string[]): CampaignPlanChannel[] {
+  const normalized = normalizeChannels(channels.map((name) => ({ name })));
+  return normalized.length ? normalized : defaultPlanChannels();
+}
+
 function normalizeChannelName(value: unknown): CampaignPlanChannel["name"] | undefined {
   const text = stringValue(value).toLowerCase();
   if (!text) return undefined;
@@ -2565,14 +3497,19 @@ function inferDelimitedList(brief: string, pattern: RegExp, fallback: string[]) 
 }
 
 function inferBudget(brief: string) {
+  if (/\bbudget\b/i.test(brief) && /\b(after|defined after|to be defined|later)\b/i.test(brief)) {
+    return "To be defined after Campaign Planning and Content Planning review";
+  }
   const match = brief.match(/\b(EUR|USD|CHF|GBP)\s*([0-9]+(?:k|K|,[0-9]{3})?)/);
   return match ? `${match[1].toUpperCase()} ${match[2].toLowerCase()}` : "EUR 50k";
 }
 
 function inferAudience(brief: string) {
+  if (/\bcold cut\b/i.test(brief)) return ["Contractors", "Installers", "Trade buyers"];
   const match = brief.match(/(?:for|target)\s+([^.]+?)(?:\.| budget| markets| locales| channels| no auto-publish|$)/i);
   if (!match?.[1]) return ["Contractors", "Specifiers"];
-  return [sentenceCase(match[1].replace(/\b(first|second|primary|secondary)\b/gi, "").trim())];
+  const clean = cleanCampaignSubject(match[1].replace(/\b(first|second|primary|secondary)\b/gi, "").trim());
+  return clean ? [sentenceCase(clean)] : ["Contractors", "Specifiers"];
 }
 
 function inferHeroProduct(brief: string) {
@@ -2580,8 +3517,25 @@ function inferHeroProduct(brief: string) {
   if (lower.includes("firestop")) return "firestop";
   if (lower.includes("measuring")) return "measuring tools";
   if (lower.includes("siw 6at-a22")) return "SIW 6AT-A22";
-  const match = brief.match(/campaign for\s+(.+?)(?:\.| budget| markets| locales| target| for |$)/i);
-  return match?.[1]?.trim() || "power tools";
+  const product = extractProductMention(brief) || cleanCampaignSubject(extractCampaignSubject(brief));
+  return product || "power tools";
+}
+
+function inferMarkets(brief: string) {
+  if (/\b(global|all markets|all the markets|worldwide)\b/i.test(brief)) return ["Global markets"];
+  const match = brief.match(/\bmarkets?\s+([A-Za-z]{2}(?:\s*,\s*[A-Za-z]{2})*)\b/i);
+  const codes = match?.[1]
+    ?.split(",")
+    .map((item) => item.trim())
+    .filter((item) => /^[A-Z]{2}$/.test(item));
+  return codes?.length ? codes : ["DE", "AT", "CH"];
+}
+
+function inferLocales(brief: string, markets: string[]) {
+  const explicit = inferDelimitedList(brief, /\blocales?\s+([a-z]{2}-[A-Z]{2}(?:\s*,\s*[a-z]{2}-[A-Z]{2})*)\b/i, []);
+  if (explicit.length) return explicit;
+  if (markets.includes("Global markets")) return ["Market-localized variants TBD"];
+  return ["de-DE", "de-AT", "de-CH", "fr-CH"];
 }
 
 function titleForAsset(heroProduct: string, channel: CampaignPlanChannel["name"], asset: string) {
@@ -2653,7 +3607,7 @@ export function createDefaultRun(overrides: Partial<CampaignRun> = {}): Campaign
     brief: defaultBrief,
     phase: "planning",
     modelMode: "not-run",
-    summary: "Create a campaign, run each phase with Panda, approve gates, and preserve the trace.",
+    summary: "Create a campaign, run each phase with Panda, review the key decisions, and preserve the trace.",
     worklog: [
       {
         id: crypto.randomUUID(),
@@ -2666,7 +3620,7 @@ export function createDefaultRun(overrides: Partial<CampaignRun> = {}): Campaign
     ],
     artifacts: [],
     gateDecisions: [],
-    nextActions: ["Run planning", "Review H1", "Approve or revise"],
+    nextActions: ["Run planning", "Review campaign planning", "Revise or mark ready"],
     updatedAt: now,
     ...overrides
   };
@@ -2682,7 +3636,7 @@ export function createCampaignFromBrief(brief: string): CampaignRun {
     brief,
     phase: "planning",
     modelMode: "not-run",
-    summary: "New campaign created. Panda is ready to structure the brief and generate the H1 plan packet.",
+    summary: "New campaign created. Panda is ready to structure the brief and generate the campaign planning draft.",
     worklog: [
       {
         id: crypto.randomUUID(),
@@ -2696,7 +3650,78 @@ export function createCampaignFromBrief(brief: string): CampaignRun {
     artifacts: [],
     gateDecisions: [],
     currentGate: undefined,
-    nextActions: ["Ask Panda to create H1", "Review assumptions", "Approve or revise"],
+    nextActions: ["Review campaign planning draft", "Review assumptions", "Revise or mark ready"],
+    updatedAt: now
+  });
+}
+
+export function createCampaignFromHomeDraft(draft: HomeCampaignDraft, originalPrompt = ""): CampaignRun {
+  const now = new Date().toISOString();
+  const id = `camp_${now.slice(2, 10).replace(/-/g, "")}_${Math.random().toString(36).slice(2, 6)}`;
+  const name = cleanCampaignSubject(draft.campaignName) || sentenceCase(draft.heroProduct || "New campaign");
+  const channels = channelsFromHomeDraft(draft.channels);
+  const assumptions = [
+    draft.timingAssumptions,
+    ...draft.missingInputs.map((item) => `Missing input: ${item}`),
+    ...draft.sourceEvidence.map((item) => `Source evidence: ${item}`)
+  ].filter(Boolean);
+  const brief = [
+    `Campaign: ${name}`,
+    `Objective: ${draft.objective}`,
+    `Hero product: ${draft.heroProduct}`,
+    `Audience: ${draft.audience.join(", ")}`,
+    `Markets: ${draft.markets.join(", ")}`,
+    `Budget: ${draft.budgetAssumptions}`,
+    originalPrompt ? "Original request is retained in the Home Panda conversation." : undefined
+  ].filter(Boolean).join("\n");
+
+  return createDefaultRun({
+    campaignId: id,
+    name,
+    brief,
+    phase: "planning",
+    modelMode: "deepseek",
+    summary: "New campaign created from Panda's reviewed Home draft. Campaign Planning is ready for revision and owner review.",
+    worklog: [
+      {
+        id: crypto.randomUUID(),
+        agent: "home-orchestrator",
+        status: "done",
+        message: "Created campaign from structured Home draft.",
+        phase: "planning",
+        createdAt: now
+      }
+    ],
+    artifacts: [
+      {
+        id: crypto.randomUUID(),
+        name: `${name} Campaign Plan`,
+        type: "campaign-plan.v3",
+        content: draft.objective,
+        phase: "planning",
+        createdAt: now,
+        data: {
+          heroProduct: draft.heroProduct,
+          markets: draft.markets,
+          locales: draft.locales,
+          audience: draft.audience,
+          budget: draft.budgetAssumptions,
+          timeline: draft.timingAssumptions,
+          channels,
+          kpis: draft.kpiCandidates,
+          assumptions
+        },
+        tool: "Panda Home Orchestrator",
+        owner: "Campaign Owner",
+        integrationMode: "API",
+        authority: "draft-write",
+        gate: "H1",
+        evidence: "Structured Home draft reviewed by user before create"
+      }
+    ],
+    gateDecisions: [],
+    currentGate: undefined,
+    nextActions: ["Review campaign planning draft", "Refine assumptions", "Prepare plan for leadership review"],
     updatedAt: now
   });
 }
@@ -2756,11 +3781,13 @@ function inferCampaignName(brief: string) {
   const compact = brief.replace(/\s+/g, " ").trim();
   if (!compact) return "Untitled campaign";
   const product = compact.match(/\b(SIW|TE|NURON|BX|PMD|HIT|EXO)[A-Z0-9 -]*/i)?.[0]?.trim();
+  const subject = product ? undefined : formatCampaignSubject(extractCampaignSubject(compact));
   const market = compact.match(/\b(DACH|DE|AT|CH|EU|global|APAC|North America)\b/i)?.[0];
   const audience = compact.match(/\b(contractors?|installers?|specifiers?|MOCN|electricians?|plumbers?)\b/i)?.[0];
   const parts: string[] = [];
   if (product) parts.push(product);
-  if (market) parts.push(market.toUpperCase());
+  else if (subject) parts.push(subject);
+  if (market && product) parts.push(market.toUpperCase());
   else if (audience) parts.push(audience.charAt(0).toUpperCase() + audience.slice(1));
   if (parts.length === 0) {
     // Fallback: first meaningful words from the brief
@@ -2768,4 +3795,18 @@ function inferCampaignName(brief: string) {
     return words.slice(0, 3).join(" ") || compact.slice(0, 48);
   }
   return parts.join(" · ");
+}
+
+function formatCampaignSubject(subject?: string) {
+  const cleaned = subject
+    ?.replace(/https?:\/\/\S+/gi, "")
+    .replace(/\b(the products? you can check here|products? you can check here)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return undefined;
+  return cleaned
+    .split(" ")
+    .slice(0, 6)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
 }

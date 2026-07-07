@@ -8,6 +8,32 @@
 
 **Tech Stack:** React 18 + TypeScript + Vite, Vercel serverless functions, Vercel AI SDK (`ai`, `@ai-sdk/openai`), DeepSeek through OpenAI-compatible provider config, Supabase/Postgres (`@supabase/supabase-js`), Vitest.
 
+## Implementation Status
+
+**Status as of 2026-07-07:** Implemented and verified in code. The unchecked task boxes below are preserved as the original execution recipe, but the runtime slice now exists in the repo:
+
+- Supabase durable schema and seed migration: `supabase/migrations/202607060001_durable_panda_runtime.sql`
+- Runtime mode/client boundary: `server/supabase-client.mjs`, `server/runtime-schema.mjs`
+- Campaign snapshot runtime: `server/campaign-runtime.mjs`
+- Runtime action executor and revision/event helpers: `server/object-runtime.mjs`, `server/runtime-events.mjs`
+- Durable agent thread/message persistence: `server/agent-runtime.mjs`
+- Vercel AI SDK transport option for DeepSeek: `server/ai-transport.mjs`
+- Durable API routing for `/api/agent`, `/api/orchestrator`, and `/api/gate-decision`: `server/panda-api.mjs`
+- UI runtime snapshot/trace binding: `src/lib/panda.ts`, `src/main.tsx`
+- Deployment guide and env variables: `.env.example`, `README.md`, `docs/deployment/vercel-durable-runtime.md`
+
+Fresh verification:
+
+- `npm test` -> 4 files / 157 tests passed
+- `npm run build` -> Vite production build passed
+
+Remaining operational steps before a Supabase-backed live demo:
+
+- Apply the migration to the target Supabase project.
+- Set Vercel env vars from `docs/deployment/vercel-durable-runtime.md`.
+- Deploy first with `PANDA_RUNTIME_MODE=local`, then switch preview to `PANDA_RUNTIME_MODE=supabase`.
+- Smoke-test real Supabase persistence for Home, Campaign Planning, Content Planning, gate decisions, and Runtime Trace.
+
 ## Global Constraints
 
 - Do not push to GitHub or Vercel until Vincent explicitly approves.
@@ -1527,4 +1553,3 @@ git commit -m "docs: add durable runtime deployment guide"
 - Vercel AI SDK transport works with DeepSeek through OpenAI-compatible config.
 - `npm test` and `npm run build` pass.
 - No GitHub push or Vercel production promotion occurs without Vincent approval.
-

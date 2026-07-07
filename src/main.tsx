@@ -31,11 +31,13 @@ import {
   applyContentPlanningInstruction,
   applyPlanningInstruction,
   AppView,
+  artifactRevisionPrompt,
   buildLeadershipFeedbackProposal,
   buildContentPlanningBridge,
   buildPlanPreviewSlides,
   buildAgentScope,
   buildPandaContextPacket,
+  campaignPlanningDeliverables,
   campaignPlanningObjectsFromPlan,
   campaignPlanningReadiness,
   campaignPlanForRun,
@@ -47,15 +49,19 @@ import {
   classifyHomeIntent,
   compactAgentMessages,
   ContentWorkObject,
+  contentCreationDeliverables,
   ContentPlanningApprovalStatus,
   ContentPlanningBridge,
+  contentPlanningDeliverables,
   ContentRequirement,
   contentPlanningBridgeReadiness,
   contentRequirementsFromPlan,
   contentWorkspaceReadiness,
   createCampaignFromBrief,
+  createCampaignFromHomeDraft,
   createContentWorkObjectsFromRequirements,
   createDefaultWorkspace,
+  createHomeDraftFallback,
   createRolloutWorkObjectsFromContent,
   currentPhaseMeta,
   defaultUserRole,
@@ -63,6 +69,11 @@ import {
   draftSpecialistAgentResponse,
   GateId,
   gateApprovalReadiness,
+  HomePromptMode,
+  HomeCampaignDraft,
+  HomeTurnResponse,
+  isHomeDraftConfirmation,
+  mergeHomeDraft,
   navigationItems,
   nextPhase,
   normalizeServerUpdates,
@@ -72,6 +83,7 @@ import {
   runtimeSnapshotEvidenceFromWorkspace,
   runtimeSnapshotsFromWorkspace,
   shouldSuppressLocalReplay,
+  shouldCreateHomeWorkspace,
   PandaAgentResponse,
   PandaArtifact,
   PandaOrchestratorResponse,
@@ -79,6 +91,8 @@ import {
   PhaseId,
   PlanningReadiness,
   PlanningWorkObject,
+  RmbDeliverable,
+  UrlResearchEvidence,
   progressForCampaign,
   progressTaskDetailRoute,
   RolloutWorkObject,
@@ -99,6 +113,17 @@ import "./styles.css";
 
 const storageKey = "panda-v4-control-tower-workspace";
 const viewStorageKey = "panda-v4-active-view";
+const homeMessagesStorageKey = "panda-v4-home-panda-messages";
+
+type HomePandaMessage = {
+  id: string;
+  role: "user" | "agent";
+  text: string;
+  route?: string;
+  highlights?: string[];
+  actions?: string[];
+  draft?: HomeCampaignDraft;
+};
 
 const phaseViewMap: Partial<Record<AppView, PhaseId>> = {
   "campaign-planning": "planning",
@@ -109,6 +134,7 @@ const phaseViewMap: Partial<Record<AppView, PhaseId>> = {
 };
 
 const initialWorkspace = loadWorkspace();
+const initialHomeMessages = loadHomePandaMessages();
 
 function App() {
   const [workspace, setWorkspace] = useState<CampaignWorkspace>(() => initialWorkspace);
@@ -116,23 +142,20 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [reviewer, setReviewer] = useState("Vincent");
   const [homePrompt, setHomePrompt] = useState("");
+  const [homePromptMode, setHomePromptMode] = useState<HomePromptMode>("plan");
   const [agentInput, setAgentInput] = useState("");
   const [workspaceAgentMessages, setWorkspaceAgentMessages] = useState<Record<string, AgentMessage[]>>({});
   const [workspaceAgentBusy, setWorkspaceAgentBusy] = useState<Record<string, boolean>>({});
   const [globalPandaOpen, setGlobalPandaOpen] = useState(false);
   const [globalPandaInput, setGlobalPandaInput] = useState("");
   const [globalPandaBusy, setGlobalPandaBusy] = useState(false);
-  const [globalPandaMessages, setGlobalPandaMessages] = useState<Array<{ id: string; role: "user" | "agent"; text: string; route?: string; highlights?: string[]; actions?: string[] }>>([
-    {
-      id: "welcome",
-      role: "agent",
-      text: "Ask me anything about this campaign. I can explain blockers, owners, gates, handoffs, and next actions."
-    }
-  ]);
+  const [globalPandaMessages, setGlobalPandaMessages] = useState<HomePandaMessage[]>(() => initialHomeMessages);
+  const [activeHomeDraft, setActiveHomeDraft] = useState<HomeCampaignDraft | undefined>(() => latestHomeDraft(initialHomeMessages));
   const [planningObjectRecords, setPlanningObjectRecords] = useState<Record<string, PlanningWorkObject[]>>({});
   const [contentRequirementRecords, setContentRequirementRecords] = useState<Record<string, ContentRequirement[]>>({});
   const [contentObjectRecords, setContentObjectRecords] = useState<Record<string, ContentWorkObject[]>>({});
   const [rolloutObjectRecords, setRolloutObjectRecords] = useState<Record<string, RolloutWorkObject[]>>({});
+  const [rmbDeliverablePatches, setRmbDeliverablePatches] = useState<Record<string, Record<string, Partial<RmbDeliverable>>>>({});
   const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, CampaignRuntimeSnapshot>>(() => runtimeSnapshotsFromWorkspace(initialWorkspace));
   const [runtimeSnapshotEvidence, setRuntimeSnapshotEvidence] = useState<Record<string, boolean>>(() => runtimeSnapshotEvidenceFromWorkspace(initialWorkspace));
   const [gateBusy, setGateBusy] = useState(false);
@@ -176,6 +199,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(viewStorageKey, view);
   }, [view]);
+
+  useEffect(() => {
+    localStorage.setItem(homeMessagesStorageKey, JSON.stringify(globalPandaMessages.slice(-40)));
+  }, [globalPandaMessages]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0 });
@@ -255,6 +282,19 @@ function App() {
     return true;
   }
 
+  function applyRmbDeliverablePatch(id: string, patch: Partial<RmbDeliverable>) {
+    setRmbDeliverablePatches((current) => ({
+      ...current,
+      [run.campaignId]: {
+        ...(current[run.campaignId] ?? {}),
+        [id]: {
+          ...(current[run.campaignId]?.[id] ?? {}),
+          ...patch
+        }
+      }
+    }));
+  }
+
   function applyCampaignPlanningFeedback(proposal: LeadershipFeedbackProposal) {
     for (const change of proposal.changes) {
       if (change.id === "add-mocn-content") {
@@ -308,6 +348,12 @@ function App() {
         contentObjects: updatedObjects,
         rolloutObjects: createRolloutWorkObjectsFromContent(updatedObjects)
       });
+    }
+
+    for (const update of specialistDraft.updates) {
+      if (update.target === "rmb_deliverable") {
+        applyRmbDeliverablePatch(update.id, update.patch);
+      }
     }
 
     appendWorkspaceAgentMessage(targetView, { role: "agent", text: specialistDraft.answer });
@@ -415,10 +461,15 @@ function App() {
     }
   }
 
-  function createCampaignFromPrompt(prompt: string) {
+  function createCampaignFromPrompt(prompt: string, draft?: HomeCampaignDraft) {
     const brief = prompt.trim();
-    if (!brief) return;
-    const campaign = createCampaignFromBrief(brief);
+    if (!brief && !draft) return;
+    const campaign = draft ? createCampaignFromHomeDraft(draft, brief) : createCampaignFromBrief(brief);
+    const plan = campaignPlanForRun(campaign);
+    const planningDraft = applyPlanningInstruction(
+      campaignPlanningObjectsFromPlan(plan),
+      "draft remaining H1 planning objects: Missing Inputs, Channel Strategy, Budget Allocation, Campaign Timeline, Assumptions & Risks"
+    );
     setWorkspace((current) => ({
       activeCampaignId: campaign.campaignId,
       campaigns: [campaign, ...current.campaigns],
@@ -429,7 +480,9 @@ function App() {
           {
             id: crypto.randomUUID(),
             role: "agent",
-            text: "I created a campaign workspace and can now plan, build, and prepare gate-ready work objects.",
+            text: draft
+              ? "I created the campaign planning draft from the reviewed Panda brief and structured plan."
+              : "I created a campaign planning draft with assumptions clearly marked for review.",
             timestamp: new Date().toISOString()
           }
         ]
@@ -441,7 +494,7 @@ function App() {
     }));
     setContentRequirementRecords((current) => ({
       ...current,
-      [campaign.campaignId]: contentRequirementsFromPlan(campaignPlanForRun(campaign))
+      [campaign.campaignId]: contentRequirementsFromPlan(plan)
     }));
     setRolloutObjectRecords((current) => ({
       ...current,
@@ -449,7 +502,7 @@ function App() {
     }));
     setPlanningObjectRecords((current) => ({
       ...current,
-      [campaign.campaignId]: campaignPlanningObjectsFromPlan(campaignPlanForRun(campaign))
+      [campaign.campaignId]: planningDraft
     }));
     setWorkspaceAgentMessages((current) => ({
       ...current,
@@ -457,7 +510,7 @@ function App() {
         {
           id: crypto.randomUUID(),
           role: "agent",
-          text: "I created the campaign workspace. Open Campaign Planning when you are ready to shape the H1 plan packet, identify missing inputs, and prepare the first gate review.",
+          text: "I created the campaign planning draft from the starter brief. Open Campaign Planning to review the objective, audience, channel strategy, success measures, budget assumptions, timing, and risks.",
           timestamp: new Date().toISOString()
         }
       ]
@@ -467,12 +520,12 @@ function App() {
     setGlobalPandaMessages((items) => [
       ...items,
       {
-        id: crypto.randomUUID(),
-        role: "agent",
-        text: `I created ${campaign.name} and kept you on the Home control tower. Open Campaign Planning from the campaign card when you want to work the H1 plan.`,
-        route: "Campaign Planning",
-        highlights: ["Campaign workspace created", "H1 planning is ready", "No automatic navigation"],
-        actions: ["Open Campaign Planning", "Review active campaigns", "Ask Panda for blockers"]
+          id: crypto.randomUUID(),
+          role: "agent",
+          text: `I created ${campaign.name} and kept you on the Home control tower. I prepared a Campaign Planning draft from ${draft ? "the reviewed Panda brief" : "the starter brief"} with assumptions marked for review. Open Campaign Planning when you want to refine the plan.`,
+          route: "Campaign Planning",
+        highlights: ["Campaign Planning draft created", "Assumptions marked for review", "No launch action taken"],
+        actions: ["Open Campaign Planning", "Review active campaigns", "Ask Panda for status"]
       }
     ]);
   }
@@ -601,81 +654,69 @@ function App() {
     }
   }
 
-  function submitHomePrompt() {
+  async function submitHomePrompt() {
     const prompt = homePrompt.trim();
     if (!prompt) return;
-    const confirmsDraftBrief = /\b(create it|use this brief|ready to create|go ahead)\b/i.test(prompt);
-    const recentHomeBrief = globalPandaMessages
-      .filter((message) => message.role === "user")
-      .slice(-3)
-      .map((message) => message.text)
-      .join(" ")
-      .trim();
-    const promptForIntent = confirmsDraftBrief && recentHomeBrief ? `${recentHomeBrief} ${prompt}` : prompt;
-    const intent = classifyHomeIntent(promptForIntent);
-
-    if (intent.type === "create-campaign") {
-      createCampaignFromPrompt(confirmsDraftBrief && recentHomeBrief ? recentHomeBrief : prompt);
-      return;
-    }
-    if (confirmsDraftBrief) {
-      setHomePrompt("");
-      setGlobalPandaMessages((items) => [
-        ...items,
-        { id: crypto.randomUUID(), role: "user", text: prompt },
-        {
-          id: crypto.randomUUID(),
-          role: "agent",
-          text: buildHomeCampaignDiscoveryReply(promptForIntent),
-          highlights: ["Brief discovery", "No campaign created yet", "More campaign detail needed"],
-          actions: ["Add audience, market, channel, KPI, budget, or timing", "Then say create it"]
-        }
-      ]);
-      return;
-    }
-    if (intent.type === "plan-campaign") {
-      setHomePrompt("");
-      setGlobalPandaOpen(false);
-      setGlobalPandaMessages((items) => [
-        ...items,
-        { id: crypto.randomUUID(), role: "user", text: prompt },
-        {
-          id: crypto.randomUUID(),
-          role: "agent",
-          text: buildHomeCampaignDiscoveryReply(prompt),
-          highlights: ["Brief discovery", "No campaign created yet", "Waiting for audience/market/channel detail"],
-          actions: ["Answer brief questions", "Say create it when ready"]
-        }
-      ]);
-      return;
-    }
+    const activeDraft = activeHomeDraft ?? latestHomeDraft(globalPandaMessages);
+    const intent = classifyHomeIntent(prompt);
     if (intent.type === "route") {
       setHomePrompt("");
       setView(intent.view);
       return;
     }
-    if (intent.type === "update-campaign") {
+
+    if (activeDraft && shouldCreateHomeWorkspace(prompt, homePromptMode)) {
       setHomePrompt("");
-      addMessage(run.campaignId, { role: "user", text: prompt });
-      void askWorkspacePanda("campaign-planning", prompt);
-      setGlobalPandaOpen(false);
+      setGlobalPandaMessages((items) => [
+        ...items,
+        { id: crypto.randomUUID(), role: "user", text: prompt }
+      ]);
+      createCampaignFromPrompt(prompt, activeDraft);
+      setActiveHomeDraft(undefined);
+      return;
+    }
+
+    setHomePrompt("");
+    setGlobalPandaOpen(false);
+    setGlobalPandaBusy(true);
+    const userMessage: HomePandaMessage = { id: crypto.randomUUID(), role: "user", text: prompt };
+    setGlobalPandaMessages((items) => [...items, userMessage]);
+    const researchEvidence = await researchUrlsFromPrompt(prompt);
+    try {
+      const packet = await runHomePandaTurn(prompt, activeDraft, researchEvidence, [...globalPandaMessages, userMessage]);
+      const nextDraft = mergeHomeDraft(packet.draft, packet.draftPatch);
+      setActiveHomeDraft(nextDraft);
       setGlobalPandaMessages((items) => [
         ...items,
         {
           id: crypto.randomUUID(),
           role: "agent",
-          text: "I routed this as a Campaign Planning revision and kept you on the Home control tower. Campaign Planning Panda will update the H1 draft objects without approving the gate.",
-          route: "Campaign Planning",
-          highlights: ["Planning revision", "No gate approval", "Shared campaign context updated"],
-          actions: ["Open Campaign Planning", "Review H1 changes"]
+          text: packet.warning ? `${packet.answer}\n\nNote: ${packet.warning}` : packet.answer,
+          highlights: ["Panda working draft", "Visible on Home", "No workspace created yet"],
+          actions: packet.suggested_actions,
+          draft: nextDraft
         }
       ]);
-      return;
+    } catch (error) {
+      const fallbackDraft = activeDraft ?? createHomeDraftFallback(prompt, researchEvidence);
+      setActiveHomeDraft(fallbackDraft);
+      const fallbackText = activeDraft
+        ? `I am still with the working draft. ${error instanceof Error ? error.message : "The live turn failed."} Tell me what to revise, or say "create campaign workspace" when the draft is ready.`
+        : `${buildHomeCampaignDiscoveryReply(prompt, researchEvidence)}\n\nNote: I could not reach the live Home agent, so this is a local draft.`;
+      setGlobalPandaMessages((items) => [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          text: fallbackText,
+          highlights: ["Local Panda draft", "No workspace created yet"],
+          actions: ["Revise draft", "Create campaign workspace"],
+          draft: fallbackDraft
+        }
+      ]);
+    } finally {
+      setGlobalPandaBusy(false);
     }
-
-    setHomePrompt("");
-    addMessage(run.campaignId, { role: "user", text: prompt });
-    void askGlobalPanda(prompt);
   }
 
   function syncRuntimeSnapshot(snapshotRaw: unknown) {
@@ -975,12 +1016,16 @@ function App() {
             <HomeLauncher
               run={run}
               prompt={homePrompt}
+              mode={homePromptMode}
               busy={busy}
               campaigns={workspace.campaigns}
               messages={globalPandaMessages}
+              activeDraft={activeHomeDraft}
               pandaBusy={globalPandaBusy}
               onPromptChange={setHomePrompt}
+              onModeChange={setHomePromptMode}
               onSubmit={submitHomePrompt}
+              onNavigate={setView}
               onOpenCampaign={(campaignId) => setWorkspace((current) => ({ ...current, activeCampaignId: campaignId }))}
               onOpenProgress={() => setView("progress")}
               onOpenSkills={() => setView("skills")}
@@ -1022,6 +1067,7 @@ function App() {
               runtimeSnapshotHasVisibleEvidence={runtimeSnapshotHasVisibleEvidence}
               runtimeEvents={runtimeSnapshot?.events ?? []}
               contentObjects={contentObjects}
+              deliverablePatches={rmbDeliverablePatches[run.campaignId] ?? {}}
               rolloutObjects={rolloutObjects}
               busy={busy || Boolean(workspaceAgentBusy[workflowAgentKey])}
               messages={workspaceAgentMessages[workflowAgentKey] ?? []}
@@ -1193,60 +1239,79 @@ function routeToView(route: string): AppView | undefined {
 function HomeLauncher({
   run,
   prompt,
+  mode,
   busy,
   campaigns,
   messages,
+  activeDraft,
   pandaBusy,
   onPromptChange,
+  onModeChange,
   onSubmit,
+  onNavigate,
   onOpenCampaign,
   onOpenProgress,
   onOpenSkills
 }: {
   run: CampaignRun;
   prompt: string;
+  mode: HomePromptMode;
   busy: boolean;
   campaigns: CampaignRun[];
   messages: Array<{ id: string; role: "user" | "agent"; text: string; route?: string; highlights?: string[]; actions?: string[] }>;
+  activeDraft?: HomeCampaignDraft;
   pandaBusy: boolean;
   onPromptChange: (value: string) => void;
+  onModeChange: (value: HomePromptMode) => void;
   onSubmit: () => void;
+  onNavigate: (target: AppView) => void;
   onOpenCampaign: (campaignId: string) => void;
   onOpenProgress: () => void;
   onOpenSkills: () => void;
 }) {
-  const visibleMessages = compactAgentMessages(messages).slice(-5);
+  const visibleMessages = messages.slice(-12);
   return (
     <div className="homePage">
       <section className="homeHero">
         <p className="eyebrow">Panda for Hilti</p>
         <h1>Ask Panda what to do next.</h1>
-        <p>Use Home as the orchestrator: ask a question, create a new campaign, update the current plan, or route work to a specialist workspace.</p>
-        <div className="promptCard">
-          <div className="homeChatHeader">
-            <span className="agentAvatar"><Bot size={15} /></span>
-            <div>
-              <b>Panda</b>
-              <small>Orchestrator</small>
+        <p>Use Home as the orchestrator: ask a question, draft a brief, create a planning draft, or route work to the right workspace.</p>
+        <div className="homeWorkArea">
+          <div className="promptCard">
+            <div className="homeChatHeader">
+              <span className="agentAvatar"><Bot size={15} /></span>
+              <div>
+                <b>Panda</b>
+                <small>Campaign-building agent</small>
+              </div>
+            </div>
+            <div className="homeAgentTranscript">
+              {visibleMessages.map((message) => (
+                <article key={message.id} className={message.role === "agent" ? "agent" : "user"}>
+                  <b>{message.role === "agent" ? "Panda" : "You"}</b>
+                  <p>{message.text}</p>
+                  {message.route && routeToView(message.route) && (
+                    <button className="homeMessageRoute" onClick={() => onNavigate(routeToView(message.route)!)}>
+                      Open {message.route}
+                    </button>
+                  )}
+                </article>
+              ))}
+              {pandaBusy && <article className="agent thinking"><b>Panda</b><p>Working on the campaign draft...</p></article>}
+            </div>
+            <textarea value={prompt} onChange={(event) => onPromptChange(event.target.value)} placeholder={activeDraft ? "Ask Panda to revise, explain assumptions, add inputs, or create the campaign workspace..." : "Tell Panda what campaign you want to build, share a source link, or ask what to do next..."} />
+            <div className="promptActions">
+              <button className="secondaryAction" onClick={onOpenSkills}><Plus size={18} /> Add skill/file</button>
+              <div className="modePicker" aria-label="Home Panda mode">
+                <button className={mode === "plan" ? "selected" : ""} onClick={() => onModeChange("plan")} type="button">Plan</button>
+                <button className={mode === "create" ? "selected" : ""} onClick={() => onModeChange("create")} type="button">Create</button>
+              </div>
+              <button className="sendFab" onClick={onSubmit} disabled={busy || !prompt.trim()}>
+                {busy ? <RefreshCw className="spin" size={20} /> : <Send size={20} />}
+              </button>
             </div>
           </div>
-          <div className="homeAgentTranscript">
-            {visibleMessages.map((message) => (
-              <article key={message.id} className={message.role === "agent" ? "agent" : "user"}>
-                <b>{message.role === "agent" ? "Panda" : "You"}</b>
-                <p>{message.text}</p>
-              </article>
-            ))}
-            {pandaBusy && <article className="agent thinking"><b>Panda</b><p>Working across the shared campaign context...</p></article>}
-          </div>
-          <textarea value={prompt} onChange={(event) => onPromptChange(event.target.value)} placeholder="Ask a question, update the current campaign, or launch a new campaign..." />
-          <div className="promptActions">
-            <button className="secondaryAction" onClick={onOpenSkills}><Plus size={18} /> Add skill/file</button>
-            <span className="orchestratorMode"><Bot size={15} /> Orchestrator</span>
-            <button className="sendFab" onClick={onSubmit} disabled={busy || !prompt.trim()}>
-              {busy ? <RefreshCw className="spin" size={20} /> : <Send size={20} />}
-            </button>
-          </div>
+          <HomeDraftCanvas draft={activeDraft} onOpenSkills={onOpenSkills} />
         </div>
       </section>
 
@@ -1269,6 +1334,64 @@ function HomeLauncher({
         </div>
       </section>
     </div>
+  );
+}
+
+function HomeDraftCanvas({ draft, onOpenSkills }: { draft?: HomeCampaignDraft; onOpenSkills: () => void }) {
+  if (!draft) {
+    return (
+      <aside className="homeDraftCanvas empty">
+        <p className="eyebrow">Working draft</p>
+        <h2>No campaign draft yet</h2>
+        <p>Give Panda a product, goal, audience, market, file, or source link. Panda will research what it can, make assumptions visible, and keep the draft here before creating a workspace.</p>
+        <button className="secondaryAction" onClick={onOpenSkills}><FileUp size={16} /> Add source or skill</button>
+      </aside>
+    );
+  }
+
+  const sections = [
+    { label: "Product", value: draft.heroProduct },
+    { label: "Objective", value: draft.objective },
+    { label: "Audience", value: draft.audience.join(", ") },
+    { label: "Markets", value: draft.markets.join(", ") },
+    { label: "Channels", value: draft.channels.join(", ") },
+    { label: "KPI candidates", value: draft.kpiCandidates.join(", ") },
+    { label: "Budget", value: draft.budgetAssumptions },
+    { label: "Timing", value: draft.timingAssumptions },
+  ];
+
+  return (
+    <aside className="homeDraftCanvas">
+      <div className="draftCanvasHead">
+        <div>
+          <p className="eyebrow">Working draft</p>
+          <h2>{draft.campaignName}</h2>
+        </div>
+        <span>Not created</span>
+      </div>
+      <div className="draftSectionGrid">
+        {sections.map((section) => (
+          <article key={section.label}>
+            <small>{section.label}</small>
+            <p>{section.value || "To be shaped with Panda"}</p>
+          </article>
+        ))}
+      </div>
+      <div className="draftListBlock">
+        <b>Missing decisions</b>
+        <ul>
+          {draft.missingInputs.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      </div>
+      {draft.sourceEvidence.length > 0 && (
+        <div className="draftListBlock evidence">
+          <b>Source evidence</b>
+          <ul>
+            {draft.sourceEvidence.slice(0, 4).map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </div>
+      )}
+    </aside>
   );
 }
 
@@ -1465,6 +1588,8 @@ function ContentWorkspace({
   phaseGate,
   reviewer,
   gateApproved,
+  gateBusy,
+  gateReadiness,
   onAgentInputChange,
   onSendAgentMessage,
   onRun,
@@ -1482,6 +1607,8 @@ function ContentWorkspace({
   phaseGate?: CampaignRun["currentGate"];
   reviewer: string;
   gateApproved: boolean;
+  gateBusy: boolean;
+  gateReadiness: { ready: boolean; reason: string };
   onAgentInputChange: (value: string) => void;
   onSendAgentMessage: () => void;
   onRun: () => void;
@@ -1495,6 +1622,7 @@ function ContentWorkspace({
   const readiness = contentWorkspaceReadiness(contentObjects);
   const locales = Array.from(new Set(contentRequirements.map((item) => item.locale))).filter((locale) => locale !== "master");
   const selectedObject = contentObjects.find((item) => item.id === selectedObjectId) ?? contentObjects[0];
+  const deliverables = useMemo(() => contentCreationDeliverables(contentObjects), [contentObjects]);
   return (
     <div className="workflowPage">
       <AgentPanel
@@ -1520,6 +1648,8 @@ function ContentWorkspace({
             phaseGate={phaseGate}
             reviewer={reviewer}
             gateApproved={gateApproved}
+            gateBusy={gateBusy}
+            gateReadiness={gateReadiness}
             onReviewerChange={onReviewerChange}
             onApproveGate={onApproveGate}
             onRequestRevision={onRequestRevision}
@@ -1532,6 +1662,12 @@ function ContentWorkspace({
           <span><b>{readiness.blocked}</b> blocked · <b>{readiness.revision}</b> revisions</span>
           <span>Next: approved H2 objects feed Rollout build lanes</span>
         </div>
+        <RmbDeliverablesPanel
+          title="Content Studio production outputs"
+          description="Content now tracks David/RMB production outputs: copy, mockups, basefile XLS, images, video variants, formatting, and compliance evidence."
+          deliverables={deliverables}
+          agentMessages={messages}
+        />
         <ObjectDetailWorkspace
           groups={groups}
           contentObjects={contentObjects}
@@ -1671,6 +1807,7 @@ function WorkflowShell({
   runtimeSnapshotHasVisibleEvidence,
   runtimeEvents,
   contentObjects,
+  deliverablePatches,
   rolloutObjects,
   busy,
   messages,
@@ -1691,6 +1828,7 @@ function WorkflowShell({
   runtimeSnapshotHasVisibleEvidence: boolean;
   runtimeEvents: CampaignRuntimeSnapshot["events"];
   contentObjects: ContentWorkObject[];
+  deliverablePatches: Record<string, Partial<RmbDeliverable>>;
   rolloutObjects: RolloutWorkObject[];
   busy: boolean;
   messages: AgentMessage[];
@@ -1748,8 +1886,6 @@ function WorkflowShell({
           objects={planningObjects}
           readiness={planningReadiness}
           requirements={contentRequirements}
-          events={runtimeEvents}
-          runtimeSnapshotHasEvidence={runtimeSnapshotHasVisibleEvidence}
           onApplyFeedback={onApplyCampaignPlanningFeedback}
           onUpdate={onUpdatePlanningObject}
         />
@@ -1758,7 +1894,10 @@ function WorkflowShell({
           <ContentPlanningBoard
             plan={campaignPlan}
             requirements={contentRequirements}
+            deliverablePatches={deliverablePatches}
+            agentMessages={messages}
             onApplyInstruction={onApplyContentPlanningInstruction}
+            onRequestArtifactRevision={(deliverable) => onAsk("content-planning", artifactRevisionPrompt(deliverable))}
           />
         )}
         {view === "rollout" && (
@@ -1803,8 +1942,6 @@ function CampaignPlanningWorkspace({
   objects,
   readiness,
   requirements,
-  events,
-  runtimeSnapshotHasEvidence,
   onApplyFeedback,
   onUpdate
 }: {
@@ -1812,8 +1949,6 @@ function CampaignPlanningWorkspace({
   objects: PlanningWorkObject[];
   readiness: PlanningReadiness;
   requirements: ContentRequirement[];
-  events: CampaignRuntimeSnapshot["events"];
-  runtimeSnapshotHasEvidence: boolean;
   onApplyFeedback: (proposal: LeadershipFeedbackProposal) => void;
   onUpdate: (id: string, status: WorkObjectStatus, comment: string) => void;
 }) {
@@ -1831,27 +1966,25 @@ function CampaignPlanningWorkspace({
 
   return (
     <div className="campaignPlanningBoard">
-      <section className="planningGateStrip" aria-label="H1 planning readiness">
+      <section className="planningGateStrip" aria-label="Campaign plan readiness">
         <div>
-          <small>H1 Plan Gate</small>
+          <small>Plan readiness</small>
           <strong>{readiness.approved}/{readiness.total} work objects approved</strong>
           <span>{readiness.blocked} blocked · {readiness.revision} revision requested</span>
         </div>
         <div className="readinessMeter">
           <span style={{ width: `${readiness.pct}%` }} />
         </div>
-        <button className="secondary" onClick={() => objects.forEach((item) => onUpdate(item.id, "approved", "Approved for H1 planning packet."))}>
+        <button className="secondary" onClick={() => objects.forEach((item) => onUpdate(item.id, "approved", "Approved for the campaign plan."))}>
           <Check size={16} /> Approve ready plan
         </button>
       </section>
 
       <PlanPacketTabs active={tab} onChange={setTab} />
 
-      <RuntimeTracePanel events={events} />
-
       {tab === "preview" && (
         <PlanPreviewPanel
-          title="H1 Campaign Plan Preview"
+          title="Campaign plan preview"
           description="Leadership-facing preview before the simulated PPTX handoff."
           slides={slides}
           onDownload={downloadDeck}
@@ -1863,7 +1996,7 @@ function CampaignPlanningWorkspace({
           view="campaign-planning"
           onApply={(proposal) => {
             onApplyFeedback(proposal);
-            setVersions((current) => [`Leadership feedback applied to H1 plan · ${proposal.summary}`, ...current]);
+            setVersions((current) => [`Leadership feedback applied to campaign plan · ${proposal.summary}`, ...current]);
           }}
         />
       )}
@@ -1875,13 +2008,12 @@ function CampaignPlanningWorkspace({
         <section className="planDocument">
           <div className="planDocumentHeader">
             <div>
-              <small>H1 plan packet · approved campaign direction</small>
+              <small>Campaign plan · approved direction</small>
               <h2>{plan.name}</h2>
               <p>{plan.heroProduct} · {plan.markets.join(", ")} · {plan.budget}</p>
             </div>
-            <span className="objectStatus in-review">H1 packet</span>
+            <span className="objectStatus in-review">Plan</span>
           </div>
-          {runtimeSnapshotHasEvidence && <span className="updatedByPanda">Updated by Panda runtime</span>}
 
           <div className="planSummary">
             <article><small>Markets</small><strong>{plan.markets.join(", ")}</strong></article>
@@ -1898,7 +2030,7 @@ function CampaignPlanningWorkspace({
 
           <section className="channelHandoff">
             <div>
-              <small>What happens after H1 approval</small>
+              <small>Next handoff</small>
               <strong>Content Planning turns this plan into channel-by-asset requirements.</strong>
             </div>
             <div className="evidenceTags">
@@ -1912,7 +2044,7 @@ function CampaignPlanningWorkspace({
         <aside className="planningObjectRows">
           <div className="objectListHeader">
             <small>Work objects</small>
-            <strong>H1 review queue</strong>
+            <strong>Planning queue</strong>
           </div>
           {objects.map((item) => (
             <PlanningObjectRow item={item} key={item.id} onUpdate={onUpdate} />
@@ -1952,10 +2084,10 @@ function PlanningSectionCard({
         {item.evidence.slice(0, 3).map((evidence) => <span key={evidence}>{evidence}</span>)}
       </div>
       <div className="objectActions">
-        <button onClick={() => onUpdate(item.id, "in-review", "Comment added on H1 planning object.")}>Comment</button>
+        <button onClick={() => onUpdate(item.id, "in-review", "Comment added on this planning object.")}>Comment</button>
         <button onClick={() => onUpdate(item.id, "revision-requested", "Ask Panda to revise this planning object.")}>Ask AI to revise</button>
-        <button onClick={() => onUpdate(item.id, "approved", "Approved for H1 planning packet.")}>Approve</button>
-        <button onClick={() => onUpdate(item.id, "revision-requested", "Revision requested before H1 approval.")}>Request revision</button>
+        <button onClick={() => onUpdate(item.id, "approved", "Approved for the campaign plan.")}>Approve</button>
+        <button onClick={() => onUpdate(item.id, "revision-requested", "Revision requested before approval.")}>Request revision</button>
       </div>
     </article>
   );
@@ -2109,6 +2241,175 @@ function VersionHistoryPanel({ versions, empty }: { versions: string[]; empty: s
   );
 }
 
+function RmbDeliverablesPanel({
+  title,
+  description,
+  deliverables,
+  agentMessages = [],
+  onRevise
+}: {
+  title: string;
+  description: string;
+  deliverables: RmbDeliverable[];
+  agentMessages?: AgentMessage[];
+  onRevise?: (deliverable: RmbDeliverable) => void;
+}) {
+  const [selectedId, setSelectedId] = useState(deliverables[0]?.id ?? "");
+  const detailRef = useRef<HTMLElement | null>(null);
+  const selectedDeliverable = deliverables.find((item) => item.id === selectedId) ?? deliverables[0];
+  const recentConversation = agentMessages.filter((message) => message.role !== "system").slice(-4);
+  function openArtifact(id: string) {
+    setSelectedId(id);
+    window.requestAnimationFrame(() => {
+      detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+  return (
+    <section className="rmbDeliverablesPanel">
+      <div className="rmbDeliverablesHeader">
+        <div>
+          <small>RMB requested outputs</small>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <span>{deliverables.length} deliverables</span>
+      </div>
+      <div className="rmbDeliverableGrid">
+        {deliverables.map((item) => (
+          <article className={item.id === selectedDeliverable?.id ? "rmbDeliverableCard selected" : "rmbDeliverableCard"} key={item.id}>
+            <div className="rmbDeliverableTop">
+              <div>
+                <small>{item.workspace} · {item.gate}</small>
+                <h3>{item.title}</h3>
+              </div>
+              <span className={`objectStatus ${item.status}`}>{item.status}</span>
+            </div>
+            <div className="outputFormatRow">
+              {item.outputFormats.map((format) => <span key={format}>{format}</span>)}
+            </div>
+            <p>{item.summary}</p>
+            <div className="deliverableSections">
+              {item.sections.slice(0, 5).map((section) => <span key={section}>{section}</span>)}
+            </div>
+            <div className="deliverableActions">
+              <button className="deliverableOpen" onClick={() => openArtifact(item.id)}>
+                <ChevronRight size={15} /> Open artifact
+              </button>
+              <button className="deliverableRevise" onClick={() => { openArtifact(item.id); onRevise?.(item); }}>
+                <PenLine size={15} /> Revise
+              </button>
+              <button className="deliverableDownload" onClick={() => simulateRmbDeliverableDownload(item)}>
+                <Download size={15} /> Download preview
+              </button>
+            </div>
+            <div className="deliverableFooter">
+              <span>{item.owner}</span>
+              <span>Handoff: {item.handoffTarget}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+      {selectedDeliverable && (
+        <section className="rmbArtifactWorkspace" ref={detailRef}>
+          <div className="artifactWorkspaceHeader">
+            <div>
+              <small>{selectedDeliverable.workspace} artifact</small>
+              <h3>{selectedDeliverable.title}</h3>
+              <p>{selectedDeliverable.workspaceAction}</p>
+            </div>
+            <div className="artifactWorkspaceActions">
+              <button className="deliverableRevise" onClick={() => onRevise?.(selectedDeliverable)}>
+                <PenLine size={15} /> Revise
+              </button>
+              <button className="deliverableDownload" onClick={() => simulateRmbDeliverableDownload(selectedDeliverable)}>
+                <Download size={15} /> Download {selectedDeliverable.outputFormats[0]}
+              </button>
+            </div>
+          </div>
+          <div className="artifactWorkspaceGrid">
+            <section>
+              <h4>Artifact Content</h4>
+              {selectedDeliverable.artifactDetails.map((detail) => (
+                <article key={`${selectedDeliverable.id}-${detail.label}`}>
+                  <small>{detail.label}</small>
+                  <p>{detail.value}</p>
+                </article>
+              ))}
+            </section>
+            <section>
+              <h4>Agent Context</h4>
+              <article>
+                <small>Revision focus</small>
+                <p>{selectedDeliverable.workspaceAction}</p>
+              </article>
+              {recentConversation.map((message) => (
+                <article key={`${selectedDeliverable.id}-${message.id}`}>
+                  <small>{message.role === "user" ? "Recent user input" : "Recent Panda conversation"}</small>
+                  <p>{message.text}</p>
+                </article>
+              ))}
+              {recentConversation.length === 0 && (
+                <article>
+                  <small>Recent conversation</small>
+                  <p>No workspace conversation yet. Click Revise to open Panda with this artifact selected, or ask a follow-up question here.</p>
+                </article>
+              )}
+            </section>
+            <section>
+              <h4>Inputs & Handoff</h4>
+              <div className="artifactChipStack">
+                {selectedDeliverable.sourceInputs.map((input) => <span key={input}>{input}</span>)}
+              </div>
+              <div className="artifactHandoffLine">
+                <span>{selectedDeliverable.approvalLevel}</span>
+                <strong>{selectedDeliverable.handoffTarget}</strong>
+              </div>
+            </section>
+          </div>
+        </section>
+      )}
+    </section>
+  );
+}
+
+function simulateRmbDeliverableDownload(deliverable: RmbDeliverable) {
+  const primaryFormat = deliverable.outputFormats[0] ?? "PPTX";
+  const extension = primaryFormat === "PPTX" ? "pptx" : primaryFormat === "Excel" || primaryFormat === "XLS" ? "xlsx" : "txt";
+  const filename = `${deliverable.id}-preview.${extension}`;
+  const body = [
+    `Prototype ${primaryFormat} preview: ${deliverable.title}`,
+    "",
+    `Workspace: ${deliverable.workspace}`,
+    `Gate: ${deliverable.gate}`,
+    `Owner: ${deliverable.owner}`,
+    `Requested by: ${deliverable.requestedBy}`,
+    `Handoff target: ${deliverable.handoffTarget}`,
+    `Summary: ${deliverable.summary}`,
+    "",
+    "Sections:",
+    ...deliverable.sections.map((section) => `- ${section}`),
+    "",
+    "Preview items:",
+    ...deliverable.previewItems.map((item) => `- ${item}`),
+    "",
+    "Artifact content:",
+    ...deliverable.artifactDetails.map((detail) => `- ${detail.label}: ${detail.value}`),
+    "",
+    "Panda context:",
+    ...deliverable.discussionNotes.map((note) => `- ${note}`),
+    "",
+    "Source inputs:",
+    ...deliverable.sourceInputs.map((input) => `- ${input}`)
+  ].join("\n");
+  const blob = new Blob([body], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 function simulatePrototypeDeckDownload(filename: string, slides: PlanPreviewSlide[]) {
   const body = [
     `Prototype PPTX placeholder: ${filename}`,
@@ -2127,11 +2428,17 @@ function simulatePrototypeDeckDownload(filename: string, slides: PlanPreviewSlid
 function ContentPlanningBoard({
   plan,
   requirements,
-  onApplyInstruction
+  deliverablePatches,
+  agentMessages,
+  onApplyInstruction,
+  onRequestArtifactRevision
 }: {
   plan: CampaignPlan;
   requirements: ContentRequirement[];
+  deliverablePatches: Record<string, Partial<RmbDeliverable>>;
+  agentMessages: AgentMessage[];
   onApplyInstruction: (instruction: string) => boolean;
+  onRequestArtifactRevision: (deliverable: RmbDeliverable) => void;
 }) {
   const bridge = useMemo(() => buildContentPlanningBridge(plan, requirements), [plan, requirements]);
   const [tab, setTab] = useState<"concept" | "requirements" | "storyboard" | "figma" | "preview" | "feedback" | "versions">("concept");
@@ -2154,6 +2461,14 @@ function ContentPlanningBoard({
   const rolloutTargets = Array.from(new Set(requirements.map((item) => item.rolloutTarget)));
   const priorityItems = requirements.slice(0, 4);
   const slides = buildPlanPreviewSlides("content-planning", plan, requirements);
+  const deliverables = useMemo(
+    () =>
+      contentPlanningDeliverables(plan, requirements).map((item) => ({
+        ...item,
+        ...(deliverablePatches[item.id] ?? {})
+      })),
+    [plan, requirements, deliverablePatches]
+  );
 
   function updateApproval(key: keyof ContentPlanningBridge, status: ContentPlanningApprovalStatus) {
     setApprovals((current) => ({ ...current, [key]: status }));
@@ -2179,6 +2494,14 @@ function ContentPlanningBoard({
           <Check size={16} /> Final H2 approval
         </button>
       </section>
+
+      <RmbDeliverablesPanel
+        title="CP1-CP4 content planning outputs"
+        description="Content Planning turns the H1 plan into approved creative concept, requirements matrix, storyboard, and Figma mapping artifacts before Content starts production."
+        deliverables={deliverables}
+        agentMessages={agentMessages}
+        onRevise={onRequestArtifactRevision}
+      />
 
       {tab === "preview" && (
         <PlanPreviewPanel
@@ -2536,7 +2859,7 @@ function handoffForView(
 ) {
   if (view === "campaign-planning") {
     return {
-      agentSubtitle: "Produces the H1 campaign plan consumed by every downstream workspace",
+      agentSubtitle: "Produces the campaign plan consumed by every downstream workspace",
       metrics: [
         `${plan.channels.length} channels`,
         `${plan.locales.length} locales`,
@@ -2547,7 +2870,7 @@ function handoffForView(
   }
   if (view === "content-planning") {
     return {
-      agentSubtitle: "Consumes H1 plan and produces the channel-by-asset requirement matrix",
+      agentSubtitle: "Consumes the campaign plan and produces the channel-by-asset requirement matrix",
       metrics: [
         `${requirements.length} requirements`,
         `${new Set(requirements.map((item) => item.channel)).size} channels`,
@@ -2559,9 +2882,9 @@ function handoffForView(
   if (view === "rollout") {
     const approved = contentObjects.filter((item) => item.status === "approved").length;
     return {
-      agentSubtitle: "Consumes approved H2 content objects and builds H3 publish readiness",
+      agentSubtitle: "Consumes approved content objects and builds publish readiness",
       metrics: [
-        `${approved}/${contentObjects.length} H2 objects approved`,
+        `${approved}/${contentObjects.length} content objects approved`,
         `${rolloutObjects.length} rollout lanes`,
         "Contentful / Sprinklr / SFMC / paid media handoff",
         "No auto-publish"
@@ -2577,22 +2900,22 @@ function handoffForView(
 function workflowSuggestionsForView(view: AppView) {
   if (view === "campaign-planning") {
     return [
-      { label: "Draft objective", prompt: "Draft a sharper H1 campaign objective and explain downstream impact." },
-      { label: "Suggest KPIs", prompt: "Review the KPI Definition object and propose measurable paid-media, HOL, email, and H3 readiness KPIs." },
+      { label: "Draft objective", prompt: "Draft a sharper campaign objective and explain downstream impact." },
+      { label: "Suggest KPIs", prompt: "Review the KPI definition and propose measurable paid-media, HOL, email, and publish-readiness KPIs." },
       { label: "Review budget", prompt: "Check whether the budget allocation matches the channel strategy and flag missing assumptions." },
-      { label: "Find gaps", prompt: "Scan the H1 plan against RMB requested outputs and list missing inputs before approval." }
+      { label: "Find gaps", prompt: "Scan the campaign plan against requested outputs and list missing inputs before approval." }
     ];
   }
   if (view === "content-planning") {
     return [
-      { label: "Build matrix", prompt: "Expand the content planning matrix from the approved H1 plan." },
+      { label: "Build matrix", prompt: "Expand the content planning matrix from the approved campaign plan." },
       { label: "Check Figma", prompt: "Identify which planned assets need Figma layout mapping evidence." },
       { label: "Locale gaps", prompt: "Find missing locale variants and owners for the content plan." }
     ];
   }
   if (view === "rollout") {
     return [
-      { label: "Prepare H3", prompt: "Prepare the H3 publish readiness checklist from approved H2 content objects." },
+      { label: "Prepare publish", prompt: "Prepare the publish readiness checklist from approved content objects." },
       { label: "Connector gaps", prompt: "List missing Contentful, Sprinklr, SFMC, and paid media connector inputs." }
     ];
   }
@@ -2862,6 +3185,77 @@ function loadWorkspace(): CampaignWorkspace {
   } catch {
     return createDefaultWorkspace();
   }
+}
+
+function loadHomePandaMessages(): HomePandaMessage[] {
+  const fallback: HomePandaMessage[] = [
+    {
+      id: "welcome",
+      role: "agent",
+      text: "Tell me what campaign you want to shape. I can draft the brief, make working assumptions, and carry the right work into Campaign Planning, Content Planning, Content, Rollout, or Progress."
+    }
+  ];
+  try {
+    const stored = localStorage.getItem(homeMessagesStorageKey);
+    if (!stored) return fallback;
+    const parsed = JSON.parse(stored) as HomePandaMessage[];
+    const valid = Array.isArray(parsed)
+      ? parsed.filter((message) => message && (message.role === "user" || message.role === "agent") && typeof message.text === "string")
+      : [];
+    return valid.length ? valid.slice(-40) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function latestHomeDraft(messages: HomePandaMessage[]): HomeCampaignDraft | undefined {
+  return [...messages].reverse().find((message) => message.role === "agent" && message.draft)?.draft;
+}
+
+async function researchUrlsFromPrompt(prompt: string): Promise<UrlResearchEvidence[]> {
+  const urls = Array.from(prompt.matchAll(/https?:\/\/[^\s,]+/gi))
+    .map((match) => match[0].replace(/[).]+$/, ""))
+    .filter((url, index, list) => list.indexOf(url) === index)
+    .slice(0, 3);
+  if (!urls.length) return [];
+
+  const results = await Promise.all(urls.map(async (url) => {
+    try {
+      const response = await fetch("/api/research-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url })
+      });
+      return (await response.json()) as UrlResearchEvidence;
+    } catch (error) {
+      return {
+        ok: false,
+        url,
+        error: error instanceof Error ? error.message : "URL research failed"
+      };
+    }
+  }));
+  return results;
+}
+
+async function runHomePandaTurn(
+  question: string,
+  activeDraft: HomeCampaignDraft | undefined,
+  researchEvidence: UrlResearchEvidence[],
+  conversation: HomePandaMessage[]
+): Promise<HomeTurnResponse> {
+  const response = await fetch("/api/home-turn", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      question,
+      active_draft: activeDraft,
+      research_evidence: researchEvidence,
+      conversation: conversation.slice(-8).map((message) => ({ role: message.role, text: message.text })),
+    })
+  });
+  if (!response.ok) throw new Error(`Home Panda turn failed with HTTP ${response.status}`);
+  return (await response.json()) as HomeTurnResponse;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

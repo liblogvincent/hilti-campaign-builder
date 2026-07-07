@@ -4,6 +4,8 @@ import {
   agentModeForPhase,
   agentStackItems,
   buildAgentScope,
+  campaignPlanningDeliverables,
+  campaignPlanningDeliverablePatchFromInstruction,
   buildPandaContextPacket,
   campaignPlanningObjectsFromPlan,
   campaignPlanningReadiness,
@@ -14,15 +16,25 @@ import {
   coverageItems,
   coverageStats,
   createContentWorkObjectsFromRequirements,
+  createCampaignFromBrief,
+  createCampaignFromHomeDraft,
+  createHomeDraftFallback,
   createDefaultRun,
   createRolloutWorkObjectsFromContent,
   displayCampaignSummary,
   draftWorkspaceAgentAnswer,
   applyContentPlanningInstruction,
+  artifactRevisionPrompt,
+  contentPlanningDeliverablePatchFromInstruction,
   buildLeadershipFeedbackProposal,
   buildPlanPreviewSlides,
+  campaignThemeForPlan,
+  campaignThemeHeadline,
+  contentCreationDeliverables,
   buildContentPlanningBridge,
+  contentPlanningDeliverables,
   buildHomeCampaignDiscoveryReply,
+  buildHomeRoleGuidanceReply,
   campaignConversationKey,
   classifyHomeIntent,
   contentPlanningBridgeReadiness,
@@ -33,7 +45,11 @@ import {
   draftSpecialistAgentResponse,
   gateApprovalReadiness,
   homeRouteAfterCampaignLaunch,
+  homeContinuationInstruction,
+  homeDraftQuestionAnswer,
   isHomeCampaignCreationIntent,
+  isHomeDraftConfirmation,
+  mergeHomeDraft,
   navigationItems,
   nextPhase,
   normalizeServerUpdates,
@@ -54,6 +70,7 @@ import {
   runtimeSnapshotEvidenceFromWorkspace,
   runtimeSnapshotsFromWorkspace,
   shouldSuppressLocalReplay,
+  shouldCreateHomeWorkspace,
   workspaceAgentMessageKey
 } from "./panda";
 
@@ -186,6 +203,14 @@ describe("panda run model", () => {
     expect(classifyHomeIntent("launch a campaign of TE70").type).toBe("plan-campaign");
   });
 
+  it("does not route to Content just because a campaign source URL contains a content path", () => {
+    const intent = classifyHomeIntent(
+      "I want to shape a campaign for Hilti SPEC2SITE software promotion. Please research https://www.hilti.com/content/hilti/W1/US/en/business/business/productivity/spec2site.html and show the assumptions before creating a workspace."
+    );
+
+    expect(intent.type).toBe("plan-campaign");
+  });
+
   it("creates a campaign only when the user gives a launch action and enough brief detail", () => {
     expect(classifyHomeIntent("create campaign for TE70 in DACH for installers with paid media and email").type).toBe("create-campaign");
   });
@@ -197,8 +222,220 @@ describe("panda run model", () => {
     expect(reply).toContain("audience");
     expect(reply).toContain("markets");
     expect(reply).toContain("channels");
-    expect(reply).toContain("create it");
+    expect(reply).toContain("proceed");
     expect(reply).toContain("brief");
+  });
+
+  it("drafts a useful Home brief from a broad cold-cut campaign prompt without creating it immediately", () => {
+    const prompt = "I want a campaign for cold cut, the products you can check here https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo, it should be launched in global markets all the markets and we may need change the markets based on the future decision with the market leaders once the campaign plan and content plan shared with them. budget should also be defined after we have the campaign and content planning.";
+    const reply = buildHomeCampaignDiscoveryReply(prompt);
+
+    expect(classifyHomeIntent(prompt).type).toBe("plan-campaign");
+    expect(reply).toContain("Initial brief for review");
+    expect(reply).toContain("Initial plan to review");
+    expect(reply).toContain("cold cut");
+    expect(reply).toContain("https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo");
+    expect(reply).toContain("Global markets");
+    expect(reply).toContain("Budget");
+    expect(reply).toContain("Campaign Planning");
+    expect(reply).toContain("success-measure");
+    expect(reply).toContain("proceed");
+    expect(reply).not.toContain("target markets assumption");
+    expect(reply).not.toMatch(/\bH[1-4]\b/);
+    expect(reply).not.toMatch(/\bblocked\b/i);
+    expect(reply).not.toMatch(/\bapproval\b/i);
+  });
+
+  it("names non-SKU campaign briefs from the campaign subject before broad market words", () => {
+    const campaign = createCampaignFromBrief(
+      "I want a campaign for cold cut, the products you can check here https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo, it should be launched in global markets."
+    );
+
+    expect(campaign.name).toContain("Cold Cut");
+    expect(campaign.name).not.toBe("GLOBAL");
+    expect(campaign.nextActions[0]).toBe("Review campaign planning draft");
+  });
+
+  it("parses the cold-cut prompt into a clean campaign plan without URL leakage", () => {
+    const prompt = "I want a campaign for cold cut, the products you can check here https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo, it should be launched in global markets all the markets and we may need change the markets based on the future decision with the market leaders once the campaign plan and content plan shared with them. budget should also be defined after we have the campaign and content planning.";
+    const plan = campaignPlanForRun(createCampaignFromBrief(prompt));
+
+    expect(plan.heroProduct).toBe("cold cut");
+    expect(plan.markets).toEqual(["Global markets"]);
+    expect(plan.audience).toEqual(["Contractors", "Installers", "Trade buyers"]);
+    expect(plan.budget).toBe("To be defined after Campaign Planning and Content Planning review");
+    expect(plan.heroProduct).not.toContain("https://");
+    expect(plan.audience.join(" ")).not.toContain("https://");
+    expect(plan.markets.join(" ")).not.toBe("al");
+  });
+
+  it("creates a campaign from a structured Home draft without reparsing the transcript", () => {
+    const campaign = createCampaignFromHomeDraft(
+      {
+        campaignName: "Cold Cut Global Campaign",
+        heroProduct: "cold cut",
+        objective: "Create qualified demand for safer, cleaner metal cutting.",
+        audience: ["Contractors", "Installers", "Trade buyers"],
+        markets: ["Global markets"],
+        locales: ["Market-localized variants TBD"],
+        channels: ["Paid Media", "Email", "HOL Landing Page", "Organic/HN"],
+        kpiCandidates: ["Qualified HOL visits", "Promotion-code engagement"],
+        budgetAssumptions: "To be defined after Campaign Planning and Content Planning review",
+        timingAssumptions: "Launch waves to be agreed with market leaders after plan review.",
+        missingInputs: ["Market priority", "Budget owner"],
+        sourceEvidence: ["CUT20 and safer cleaner cutting proof points from the researched product page."]
+      },
+      "I want a campaign for cold cut, see https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo"
+    );
+    const plan = campaignPlanForRun(campaign);
+
+    expect(campaign.name).toBe("Cold Cut Global Campaign");
+    expect(campaign.brief).toContain("Create qualified demand");
+    expect(plan.heroProduct).toBe("cold cut");
+    expect(plan.markets).toEqual(["Global markets"]);
+    expect(plan.locales).toEqual(["Market-localized variants TBD"]);
+    expect(plan.audience).toEqual(["Contractors", "Installers", "Trade buyers"]);
+    expect(plan.budget).toBe("To be defined after Campaign Planning and Content Planning review");
+    expect(plan.channels.map((channel) => channel.name)).toEqual(["Paid Media", "Email", "HOL Landing Page", "Organic / HN"]);
+    expect(plan.kpis).toEqual(["Qualified HOL visits", "Promotion-code engagement"]);
+    expect(plan.assumptions).toContain("Missing input: Market priority");
+    expect(plan.heroProduct).not.toContain("https://");
+  });
+
+  it("merges Home draft patches without dropping existing campaign-building fields", () => {
+    const draft = {
+      campaignName: "Diamond Coring Demand Campaign",
+      heroProduct: "Hilti diamond coring products",
+      objective: "Create qualified demand for precise coring solutions.",
+      audience: ["Contractors", "Installers"],
+      markets: ["Global markets"],
+      locales: ["Market-localized variants TBD"],
+      channels: ["Paid Media", "Email"],
+      kpiCandidates: ["Qualified HOL visits"],
+      budgetAssumptions: "Budget follows plan review.",
+      timingAssumptions: "Market leaders confirm timing.",
+      missingInputs: ["Priority markets"],
+      sourceEvidence: ["User supplied product family."],
+    };
+
+    const merged = mergeHomeDraft(draft, {
+      channels: ["Paid Media", "Email", "HOL Landing Page"],
+      missingInputs: ["Priority markets", "Hero offer"],
+    });
+
+    expect(merged.campaignName).toBe("Diamond Coring Demand Campaign");
+    expect(merged.objective).toBe("Create qualified demand for precise coring solutions.");
+    expect(merged.channels).toEqual(["Paid Media", "Email", "HOL Landing Page"]);
+    expect(merged.missingInputs).toEqual(["Priority markets", "Hero offer"]);
+    expect(merged.sourceEvidence).toEqual(["User supplied product family."]);
+  });
+
+  it("answers Home draft assumption questions naturally without workflow jargon", () => {
+    const answer = homeDraftQuestionAnswer("where is the assumption?", {
+      campaignName: "Diamond Coring Demand Campaign",
+      heroProduct: "Hilti diamond coring products",
+      objective: "Create qualified demand for precise coring solutions.",
+      audience: ["Contractors", "Installers"],
+      markets: ["Global markets"],
+      locales: ["Market-localized variants TBD"],
+      channels: ["Paid Media", "Email", "HOL Landing Page"],
+      kpiCandidates: ["Qualified HOL visits"],
+      budgetAssumptions: "Budget follows plan review.",
+      timingAssumptions: "Market leaders confirm timing.",
+      missingInputs: ["Priority markets", "Hero offer"],
+      sourceEvidence: ["User supplied product family."],
+    });
+
+    expect(answer).toContain("working assumptions");
+    expect(answer).toContain("Budget follows plan review");
+    expect(answer).toContain("Priority markets");
+    expect(answer).not.toMatch(/\bblocked\b/i);
+    expect(answer).not.toContain("Risk lane");
+    expect(answer).not.toMatch(/\bapproval\b/i);
+    expect(answer).not.toMatch(/\bH[1-4]\b/);
+  });
+
+  it("creates a visible fallback Home draft when the live Home agent is unavailable", () => {
+    const draft = createHomeDraftFallback(
+      "i want to build a campaign about diamond coring products of Hilti.",
+      []
+    );
+
+    expect(draft.campaignName.toLowerCase()).toContain("diamond coring");
+    expect(draft.heroProduct).toContain("diamond coring products of Hilti");
+    expect(draft.objective).toContain("diamond coring products");
+    expect(draft.audience).toContain("Contractors");
+    expect(draft.channels).toContain("Paid Media");
+    expect(draft.missingInputs).toContain("Market priority");
+  });
+
+  it("uses researched URL evidence in the Home brief before asking the user to create", () => {
+    const prompt = "I want a campaign for cold cut, the products you can check here https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo";
+    const reply = buildHomeCampaignDiscoveryReply(prompt, [
+      {
+        ok: true,
+        url: "https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo",
+        title: "Cold Cut Promo | Hilti Hong Kong",
+        summary: "Metal Cutting Made Safer, Faster and Cleaner. Save 20% with promo code CUT20.",
+        facts: ["Save 20% on cordless cold-cutting solutions with promo code CUT20."]
+      }
+    ]);
+
+    expect(reply).toContain("Panda researched the linked page before drafting");
+    expect(reply).toContain("Cold Cut Promo | Hilti Hong Kong");
+    expect(reply).toContain("CUT20");
+    expect(reply).toContain("Initial plan to review");
+  });
+
+  it("resolves a Home proceed confirmation into an H1 planning draft action", () => {
+    const instruction = homeContinuationInstruction(
+      "proceed please",
+      "I can help start the Missing Inputs and Channel Strategy. For Missing Inputs, do you want me to identify what's missing and assign owners? For Channel Strategy, should I draft the strategy based on the current plan?"
+    );
+
+    expect(instruction).toContain("draft remaining H1 planning objects");
+    expect(instruction).toContain("Missing Inputs");
+    expect(instruction).toContain("Channel Strategy");
+  });
+
+  it("treats proceed as confirmation to create a reviewed Home draft", () => {
+    expect(isHomeDraftConfirmation("proceed please")).toBe(true);
+    expect(isHomeDraftConfirmation("go ahead")).toBe(true);
+    expect(isHomeDraftConfirmation("hello panda")).toBe(false);
+  });
+
+  it("only creates a Home campaign workspace on explicit create intent", () => {
+    expect(shouldCreateHomeWorkspace("create campaign workspace", "plan")).toBe(true);
+    expect(shouldCreateHomeWorkspace("please create the campaign planning draft", "plan")).toBe(true);
+    expect(shouldCreateHomeWorkspace("This is good enough for a first campaign draft. Create the campaign workspace from this SPEC2SITE draft.", "plan")).toBe(true);
+    expect(shouldCreateHomeWorkspace("proceed please", "create")).toBe(true);
+    expect(shouldCreateHomeWorkspace("Please show me the assumptions and missing decisions before we create the campaign workspace.", "plan")).toBe(false);
+    expect(shouldCreateHomeWorkspace("not yet, show me the assumptions before creating", "create")).toBe(false);
+  });
+
+  it("gives role-aware guidance for content creators without making planning review a hard block", () => {
+    const reply = buildHomeRoleGuidanceReply("I am a content creator, what should I do for this campaign?");
+
+    expect(reply).toContain("Content");
+    expect(reply).toContain("current draft assumptions");
+    expect(reply).toContain("copy");
+    expect(reply).not.toMatch(/\bH[1-4]\b/);
+    expect(reply).not.toMatch(/\bblocked\b/i);
+  });
+
+  it("drafts the remaining H1 planning objects when Panda is asked to proceed", () => {
+    const objects = campaignPlanningObjectsFromPlan(campaignPlanForRun(createDefaultRun()));
+    const updated = applyPlanningInstruction(
+      objects,
+      "draft remaining H1 planning objects: Missing Inputs, Channel Strategy, Budget Allocation, Campaign Timeline, Assumptions & Risks"
+    );
+
+    expect(updated.find((item) => item.id === "channel-strategy")?.status).toBe("in-review");
+    expect(updated.find((item) => item.id === "budget-allocation")?.status).toBe("in-review");
+    expect(updated.find((item) => item.id === "campaign-timeline")?.status).toBe("in-review");
+    expect(updated.find((item) => item.id === "assumptions-risks")?.status).toBe("in-review");
+    expect(updated.find((item) => item.id === "missing-inputs")?.status).toBe("in-review");
+    expect(updated.find((item) => item.id === "missing-inputs")?.copy).toContain("owners");
   });
 
   it("restores a persisted app view only when it is valid", () => {
@@ -432,6 +669,114 @@ describe("panda run model", () => {
     expect(updated.at(-1)?.evidence).toContain("Panda instruction: MOCN audience only");
   });
 
+  it("creates a CP1 creative concept deliverable patch from a content planning instruction", () => {
+    const plan = campaignPlanForRun(createDefaultRun({ name: "TE2-22 Launch" }));
+    const patch = contentPlanningDeliverablePatchFromInstruction(plan, "please create the cp1 creatieve concept");
+
+    expect(patch?.id).toBe("cp1-creative-concept");
+    expect(patch?.patch.status).toBe("in-review");
+    expect(patch?.patch.previewItems?.[0]).toContain("Built for the Job");
+    expect(patch?.patch.artifactDetails).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Big idea", value: expect.stringContaining("Built for the Job") }),
+        expect.objectContaining({ label: "Key message" }),
+        expect.objectContaining({ label: "Visual direction" })
+      ])
+    );
+    expect(patch?.patch.discussionNotes?.join(" ")).toContain("Panda created CP1");
+  });
+
+  it("drafts a specialist update when Content Planning Panda creates CP1", () => {
+    const run = createDefaultRun();
+    const plan = campaignPlanForRun(run);
+    const packet = buildPandaContextPacket({
+      run,
+      currentView: "content-planning",
+      currentPhase: "content",
+      userRole: defaultUserRole,
+      campaignPlan: plan,
+      planningObjects: campaignPlanningObjectsFromPlan(plan),
+      contentRequirements: contentRequirementsFromPlan(plan),
+      contentObjects: createContentWorkObjectsFromRequirements(contentRequirementsFromPlan(plan)),
+      rolloutObjects: []
+    });
+
+    const response = draftSpecialistAgentResponse("content-planning", "please create the cp1 creative concept", packet);
+
+    expect(response.answer).toContain("created CP1 creative concept");
+    expect(response.updates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ target: "rmb_deliverable", id: "cp1-creative-concept" })
+      ])
+    );
+  });
+
+  it("creates a real H1 MarCom deliverable patch from a campaign planning instruction", () => {
+    const plan = campaignPlanForRun(createDefaultRun({ name: "TE2-22 Launch" }));
+    const objects = campaignPlanningObjectsFromPlan(plan);
+    const patch = campaignPlanningDeliverablePatchFromInstruction(plan, objects, "please create the H1 MarCom planning packet");
+
+    expect(patch?.id).toBe("marcom-plan");
+    expect(patch?.patch.status).toBe("in-review");
+    expect(patch?.patch.previewItems?.[0]).toContain(campaignThemeHeadline(plan.heroProduct));
+    expect(patch?.patch.artifactDetails).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Campaign theme", value: expect.stringContaining(plan.heroProduct) }),
+        expect.objectContaining({ label: "Objective and KPIs" }),
+        expect.objectContaining({ label: "Audience" }),
+        expect.objectContaining({ label: "Channel overview" })
+      ])
+    );
+    expect(patch?.patch.artifactDetails?.find((item) => item.label === "Campaign theme")?.value).toContain(campaignThemeHeadline(plan.heroProduct));
+    expect(patch?.patch.discussionNotes?.join(" ")).toContain("Panda created H1 MarCom");
+  });
+
+  it("builds a scoped revision prompt for a specific artifact", () => {
+    const deliverable = campaignPlanningDeliverables(campaignPlanForRun(createDefaultRun())).find((item) => item.id === "marcom-plan");
+
+    expect(deliverable).toBeDefined();
+    const prompt = artifactRevisionPrompt(deliverable!);
+
+    expect(prompt).toContain(deliverable!.title);
+    expect(prompt).toContain("Campaign theme");
+    expect(prompt).toContain(deliverable!.handoffTarget);
+    expect(prompt).toContain("Revise");
+  });
+
+  it("revises CP1 creative concept when asked to revise the object", () => {
+    const plan = campaignPlanForRun(createDefaultRun({ name: "TE 70 Heavy-Duty Launch" }));
+    const patch = contentPlanningDeliverablePatchFromInstruction(plan, "revise the CP1 creative concept with a stronger campaign theme");
+
+    expect(patch?.id).toBe("cp1-creative-concept");
+    expect(patch?.patch.artifactDetails?.find((item) => item.label === "Big idea")?.value).toContain(campaignThemeHeadline(plan.heroProduct));
+    expect(patch?.patch.previewItems?.[0]).toContain(campaignThemeHeadline(plan.heroProduct));
+  });
+
+  it("drafts a specialist update when Campaign Planning Panda creates an H1 artifact", () => {
+    const run = createDefaultRun();
+    const plan = campaignPlanForRun(run);
+    const packet = buildPandaContextPacket({
+      run,
+      currentView: "campaign-planning",
+      currentPhase: "planning",
+      userRole: defaultUserRole,
+      campaignPlan: plan,
+      planningObjects: campaignPlanningObjectsFromPlan(plan),
+      contentRequirements: contentRequirementsFromPlan(plan),
+      contentObjects: [],
+      rolloutObjects: []
+    });
+
+    const response = draftSpecialistAgentResponse("campaign-planning", "please create the H1 MarCom planning packet", packet);
+
+    expect(response.answer).toContain("created Campaign plan");
+    expect(response.updates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ target: "rmb_deliverable", id: "marcom-plan" })
+      ])
+    );
+  });
+
   it("does not duplicate the MOCN audience requirement", () => {
     const run = createDefaultRun();
     const plan = campaignPlanForRun(run);
@@ -555,6 +900,33 @@ describe("panda run model", () => {
     expect(plan.kpis).toContain("H3 publish readiness without auto-publish");
   });
 
+  it("defines RMB campaign planning deliverables with requested output formats", () => {
+    const plan = campaignPlanForRun(createDefaultRun());
+    const deliverables = campaignPlanningDeliverables(plan);
+
+    expect(deliverables.map((item) => item.id)).toEqual([
+      "marcom-plan",
+      "paid-media-plan",
+      "hol-journey-map",
+      "email-ta-brief",
+      "organic-hn-strategy"
+    ]);
+    expect(deliverables.find((item) => item.id === "paid-media-plan")?.outputFormats).toEqual(["Excel", "PPTX"]);
+    expect(deliverables.find((item) => item.id === "paid-media-plan")?.sections).toEqual(
+      expect.arrayContaining(["Platform mix", "Budget split", "Projected KPIs", "Testing roadmap"])
+    );
+    expect(deliverables.every((item) => item.gate === "H1" && item.previewItems.length > 0)).toBe(true);
+  });
+
+  it("renders a campaign theme that sounds like a real theme line", () => {
+    const plan = campaignPlanForRun(createDefaultRun({ name: "TE 70 Heavy-Duty Launch" }));
+    const theme = campaignThemeForPlan(plan);
+
+    expect(theme).toContain(campaignThemeHeadline(plan.heroProduct));
+    expect(theme).toContain(plan.heroProduct);
+    expect(theme).not.toContain("proof-led Hilti value story");
+  });
+
   it("hands campaign planning into content planning requirements", () => {
     const requirements = contentRequirementsFromPlan(campaignPlanForRun(createDefaultRun()));
 
@@ -564,7 +936,32 @@ describe("panda run model", () => {
     expect(requirements.some((item) => item.channel === "HOL Landing Page" && item.rolloutTarget === "Contentful")).toBe(true);
     expect(requirements.some((item) => item.locale === "fr-CH" && item.source === "Content Planning matrix")).toBe(true);
     expect(requirements[0].title).toContain("SIW 6AT-A22");
-    expect(requirements.every((item) => item.evidence.includes("H1 Campaign Plan"))).toBe(true);
+    expect(requirements.every((item) => item.evidence.includes("Campaign plan"))).toBe(true);
+  });
+
+  it("defines RMB content planning deliverables for CP1 through CP4 outputs", () => {
+    const plan = campaignPlanForRun(createDefaultRun());
+    const requirements = contentRequirementsFromPlan(plan);
+    const deliverables = contentPlanningDeliverables(plan, requirements);
+    const creativeConcept = deliverables.find((item) => item.id === "cp1-creative-concept");
+
+    expect(deliverables.map((item) => item.id)).toEqual([
+      "cp1-creative-concept",
+      "cp2-requirements-matrix",
+      "cp3-storyboard",
+      "cp4-figma-mapping"
+    ]);
+    expect(deliverables.find((item) => item.id === "cp2-requirements-matrix")?.outputFormats).toEqual(["Excel"]);
+    expect(deliverables.find((item) => item.id === "cp4-figma-mapping")?.outputFormats).toEqual(["Figma mock", "Mapping table"]);
+    expect(deliverables.every((item) => item.gate === "H2" && item.approvalLevel === "object-and-final")).toBe(true);
+    expect(creativeConcept?.artifactDetails).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Head" }),
+        expect.objectContaining({ label: "Heart" }),
+        expect.objectContaining({ label: "Hands" })
+      ])
+    );
+    expect(creativeConcept?.discussionNotes.join(" ")).toContain("Panda");
   });
 
   it("generates content work objects from the content planning matrix", () => {
@@ -576,6 +973,32 @@ describe("panda run model", () => {
     expect(objects.some((item) => item.title.includes("fr-CH") && item.channel === "Email")).toBe(true);
     expect(objects.every((item) => item.evidence.includes("Content Planning matrix"))).toBe(true);
     expect(objects.every((item) => item.actions.includes("Approve") || item.actions.includes("Flag compliance"))).toBe(true);
+  });
+
+  it("defines RMB content creation deliverables with production and export outputs", () => {
+    const plan = campaignPlanForRun(createDefaultRun());
+    const objects = createContentWorkObjectsFromRequirements(contentRequirementsFromPlan(plan));
+    const deliverables = contentCreationDeliverables(objects);
+    const paidMediaCopy = deliverables.find((item) => item.id === "paid-media-copy");
+
+    expect(deliverables.map((item) => item.id)).toEqual([
+      "paid-media-copy",
+      "organic-hn-content",
+      "landing-page-mockup",
+      "email-copy",
+      "email-basefile",
+      "image-assets",
+      "video-assets",
+      "asset-formatting",
+      "compliance-report"
+    ]);
+    expect(deliverables.find((item) => item.id === "email-basefile")?.outputFormats).toEqual(["XLS"]);
+    expect(deliverables.find((item) => item.id === "compliance-report")?.sections).toEqual(
+      expect.arrayContaining(["Brand rules", "Legal claims", "AI guidelines", "Ready for upload"])
+    );
+    expect(deliverables.every((item) => item.gate === "H2" && item.workspace === "Content")).toBe(true);
+    expect(paidMediaCopy?.artifactDetails.some((detail) => detail.value.includes("Search ad headline"))).toBe(true);
+    expect(paidMediaCopy?.discussionNotes.some((note) => note.includes("Content Planning matrix"))).toBe(true);
   });
 
   it("hands approved content work into rollout build objects", () => {
@@ -936,7 +1359,7 @@ describe("panda run model", () => {
     expect(bridge.requirements.storyId).toBe("CP2");
     expect(bridge.storyboard.storyId).toBe("CP3");
     expect(bridge.figmaBoard.storyId).toBe("CP4");
-    expect(bridge.creativeConcept.head).toContain(plan.heroProduct);
+    expect(bridge.creativeConcept.head).toContain(campaignThemeHeadline(plan.heroProduct));
     expect(bridge.requirements.rows.length).toBe(requirements.length);
     expect(bridge.storyboard.frames.length).toBeGreaterThan(0);
     expect(bridge.figmaBoard.frames.length).toBeGreaterThan(0);

@@ -34,6 +34,29 @@ Rules:
 - Return only compact JSON with this shape:
 {"answer": string, "highlights": string[], "suggested_actions": string[], "route": string}`;
 
+const homeDraftPrompt = `You are Panda, the global Hilti campaign orchestrator.
+Your job is to draft the brief and initial plan before a campaign workspace is created.
+Rules:
+- Be natural, concise, and useful to a campaign owner.
+- If URL research evidence is provided, reason from it and cite the observed facts in plain language.
+- Do not create, approve, launch, publish, or spend. You are preparing a reviewable draft.
+- Avoid internal gate jargon unless the user asks for it.
+- Treat channels, KPIs, budget, timing, and markets as assumptions when the user has not confirmed them.
+- If the user asks for global/all markets, keep market scope as "Global markets" and note market leaders can refine it later.
+- Return only compact JSON with this shape:
+{"answer": string, "draft": {"campaignName": string, "heroProduct": string, "objective": string, "audience": string[], "markets": string[], "locales": string[], "channels": string[], "kpiCandidates": string[], "budgetAssumptions": string, "timingAssumptions": string, "missingInputs": string[], "sourceEvidence": string[]}, "suggested_actions": string[]}`;
+
+const homeTurnPrompt = `You are Panda, Hilti's campaign-building agent.
+You are not a workflow status bot. You help the user think, draft, revise, and decide what should become visible campaign work.
+Rules:
+- Answer naturally in plain language.
+- If active_draft is present, use it as the current working draft and answer follow-up questions from it.
+- If URL research evidence is provided, reason from it before drafting or revising.
+- Do not create, approve, launch, publish, or spend unless the user explicitly asks to create a workspace from a reviewed draft.
+- Do not use internal gate jargon like H1, blocked, Risk lane, or approval while shaping a Home brief.
+- Return only compact JSON with this shape:
+{"answer": string, "draft": {"campaignName": string, "heroProduct": string, "objective": string, "audience": string[], "markets": string[], "locales": string[], "channels": string[], "kpiCandidates": string[], "budgetAssumptions": string, "timingAssumptions": string, "missingInputs": string[], "sourceEvidence": string[]}, "draftPatch": object, "suggested_actions": string[], "intent": string}`;
+
 export async function handlePandaApiRequest(req, res) {
   setCors(res);
   if (req.method === "OPTIONS") return sendJson(res, 204, null);
@@ -43,6 +66,9 @@ export async function handlePandaApiRequest(req, res) {
   if (pathname === "/api/agent") return handleAgent(req, res);
   if (pathname === "/api/gate-decision") return handleGateDecision(req, res);
   if (pathname === "/api/orchestrator") return handleOrchestrator(req, res);
+  if (pathname === "/api/home-draft") return handleHomeDraft(req, res);
+  if (pathname === "/api/home-turn") return handleHomeTurn(req, res);
+  if (pathname === "/api/research-url") return handleResearchUrl(req, res);
   if (pathname === "/api/integrations/status") return handleIntegrationStatus(req, res);
   if (pathname === "/api/integrations/package") return handleIntegrationPackage(req, res);
 
@@ -52,6 +78,158 @@ export async function handlePandaApiRequest(req, res) {
 export async function handleHealth(_req, res) {
   setCors(res);
   return sendJson(res, 200, { ok: true, deepseek: Boolean(process.env.DEEPSEEK_API_KEY) });
+}
+
+export async function handleResearchUrl(req, res) {
+  setCors(res);
+  if (req.method === "OPTIONS") return sendJson(res, 204, null);
+  if (req.method !== "POST") return sendJson(res, 405, { error: "Method not allowed" });
+
+  const payload = await readJson(req);
+  const url = typeof payload.url === "string" ? payload.url.trim() : "";
+  const evidence = await researchUrl(url);
+  return sendJson(res, evidence.ok ? 200 : 422, evidence);
+}
+
+export async function handleHomeDraft(req, res) {
+  setCors(res);
+  if (req.method === "OPTIONS") return sendJson(res, 204, null);
+  if (req.method !== "POST") return sendJson(res, 405, { error: "Method not allowed" });
+
+  const payload = await readJson(req);
+  const fallback = buildHomeDraftFallback(payload);
+  let result;
+  try {
+    result = await callJsonAgent({
+      payload,
+      systemPrompt: homeDraftPrompt,
+      fallback,
+      normalize: (data, requestPayload, mode) => normalizeHomeDraftResponse(data, requestPayload, mode),
+    });
+  } catch (error) {
+    result = {
+      mode: "fixture",
+      warning: error instanceof Error ? error.message : "Home draft failed",
+      ...fallback,
+    };
+  }
+  return sendJson(res, 200, result);
+}
+
+export async function handleHomeTurn(req, res) {
+  setCors(res);
+  if (req.method === "OPTIONS") return sendJson(res, 204, null);
+  if (req.method !== "POST") return sendJson(res, 405, { error: "Method not allowed" });
+
+  const payload = await readJson(req);
+  const fallback = buildHomeTurnFallback(payload);
+  let result;
+  try {
+    result = await callJsonAgent({
+      payload,
+      systemPrompt: homeTurnPrompt,
+      fallback,
+      normalize: (data, requestPayload, mode) => normalizeHomeTurnResponse(data, requestPayload, mode),
+    });
+  } catch (error) {
+    result = {
+      mode: "fixture",
+      warning: error instanceof Error ? error.message : "Home turn failed",
+      ...fallback,
+    };
+  }
+  return sendJson(res, 200, result);
+}
+
+export async function researchUrl(url, fetchImpl = fetch) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, url, error: "Invalid URL" };
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    return { ok: false, url, error: "Only http and https URLs can be researched" };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetchImpl(parsed.toString(), {
+      signal: controller.signal,
+      headers: {
+        "user-agent": "Panda Agentic E2E Prototype/4.0",
+        accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
+      },
+    });
+    const html = await response.text();
+    if (!response.ok) {
+      return { ok: false, url: parsed.toString(), status: response.status, error: `URL returned HTTP ${response.status}` };
+    }
+    const evidence = summarizeHtmlEvidence(html);
+    return {
+      ok: true,
+      url: parsed.toString(),
+      status: response.status,
+      title: evidence.title,
+      description: evidence.description,
+      summary: evidence.summary,
+      facts: evidence.facts,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      url: parsed.toString(),
+      error: error instanceof Error ? error.message : "URL research failed",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function normalizeHomeDraftResponse(data, payload, mode) {
+  const fallback = buildHomeDraftFallback(payload);
+  const merged = {
+    ...fallback,
+    ...(data && typeof data === "object" ? data : {}),
+  };
+  const draft = data && typeof data === "object" && data.draft && typeof data.draft === "object"
+    ? data.draft
+    : fallback.draft;
+  const normalizedDraft = normalizeHomeDraft(draft, fallback.draft, payload);
+  return {
+    mode,
+    warning: typeof merged.warning === "string" ? merged.warning : undefined,
+    answer: ensureHomeDraftAnswerEvidence(stringValue(merged.answer) || fallback.answer, normalizedDraft),
+    draft: normalizedDraft,
+    suggested_actions: stringArray(merged.suggested_actions, fallback.suggested_actions).slice(0, 6),
+  };
+}
+
+export function normalizeHomeTurnResponse(data, payload, mode) {
+  const fallback = buildHomeTurnFallback(payload);
+  const merged = {
+    ...fallback,
+    ...(data && typeof data === "object" ? data : {}),
+  };
+  const draftSource = data && typeof data === "object" && data.draft && typeof data.draft === "object"
+    ? data.draft
+    : fallback.draft;
+  const normalizedDraft = normalizeHomeDraft(draftSource, fallback.draft, payload);
+  const answer = scrubHomeJargon(
+    ensureHomeDraftAnswerEvidence(stringValue(merged.answer) || fallback.answer, normalizedDraft),
+    normalizedDraft,
+    payload,
+  );
+  return {
+    mode,
+    warning: typeof merged.warning === "string" ? merged.warning : undefined,
+    answer,
+    draft: normalizedDraft,
+    draftPatch: normalizeDraftPatch(merged.draftPatch),
+    suggested_actions: stringArray(merged.suggested_actions, fallback.suggested_actions).slice(0, 6),
+    intent: stringValue(merged.intent) || fallback.intent,
+  };
 }
 
 export async function handleAgent(req, res) {
@@ -341,6 +519,335 @@ function integrationStatus() {
     linkedin_ads: "file-export",
     h3_publish: "human-gated",
   };
+}
+
+function buildHomeTurnFallback(payload) {
+  const activeDraft = payload?.active_draft && typeof payload.active_draft === "object" ? payload.active_draft : undefined;
+  const fallbackDraft = buildHomeDraftFallback({
+    prompt: stringValue(payload?.question),
+    research_evidence: Array.isArray(payload?.research_evidence) ? payload.research_evidence : [],
+  }).draft;
+  const intent = inferHomeTurnIntent(payload, Boolean(activeDraft));
+  const draft = normalizeHomeDraft(intent === "draft-brief" ? fallbackDraft : activeDraft || fallbackDraft, fallbackDraft, {
+    prompt: stringValue(payload?.question),
+    question: stringValue(payload?.question),
+  });
+  return {
+    answer: draftAwareHomeAnswer(stringValue(payload?.question), draft, intent),
+    draft,
+    draftPatch: {},
+    suggested_actions: homeTurnActions(intent),
+    intent,
+  };
+}
+
+function inferHomeTurnIntent(payload, hasActiveDraft) {
+  const question = stringValue(payload?.question).toLowerCase();
+  if (isNewCampaignBriefRequest(question)) return "draft-brief";
+  if (hasActiveDraft && /\b(assumption|assumptions|missing|need|input|inputs|budget|timing|market|audience|channel|kpi)\b/i.test(question)) {
+    return "answer-draft-question";
+  }
+  if (/\b(create|build|make)\b.*\b(workspace|campaign|plan)\b/i.test(question)) return "create-workspace-request";
+  if (hasActiveDraft && /\b(change|revise|update|adjust|add|remove)\b/i.test(question)) return "revise-draft";
+  return hasActiveDraft ? "continue-draft" : "draft-brief";
+}
+
+function isNewCampaignBriefRequest(question) {
+  const text = String(question || "");
+  return /\b(i\s+(want|need|would like)|start|launch|create|plan|build)\b[\s\S]{0,160}\bcampaign\b/i.test(text)
+    || /\bcampaign\s+(for|of|about|around)\b/i.test(text);
+}
+
+function draftAwareHomeAnswer(question, draft, intent) {
+  const lower = String(question || "").toLowerCase();
+  if (intent === "answer-draft-question" && lower.includes("assumption")) {
+    return [
+      "Here are the working assumptions in the draft so far:",
+      `Product focus: ${draft.heroProduct}.`,
+      `Market scope: ${draft.markets.join(", ")}.`,
+      `Audience starting point: ${draft.audience.join(", ")}.`,
+      `Channels to explore: ${draft.channels.join(", ")}.`,
+      `Budget: ${draft.budgetAssumptions}.`,
+      `Timing: ${draft.timingAssumptions}.`,
+      `Still missing: ${draft.missingInputs.join(", ")}.`,
+    ].join("\n");
+  }
+  if (intent === "answer-draft-question" && lower.includes("missing")) {
+    return [
+      "The draft can move forward, but these decisions still need human or market input:",
+      ...draft.missingInputs.map((item) => `- ${item}`),
+      "I can keep drafting with assumptions, or you can give me any of these details and I will revise the brief here before creating the workspace.",
+    ].join("\n");
+  }
+  if (intent === "create-workspace-request") {
+    return "I can create the campaign workspace from this reviewed draft. I will carry the objective, audience, market assumptions, channel direction, KPI candidates, budget/timing assumptions, missing decisions, and source evidence into Campaign Planning.";
+  }
+  if (intent === "revise-draft") {
+    return "I will revise the working draft here first, then show you the updated campaign brief before anything is created.";
+  }
+  return fallbackHomeAnswer(draft);
+}
+
+function homeTurnActions(intent) {
+  if (intent === "create-workspace-request") return ["Create campaign workspace", "Review draft first"];
+  if (intent === "answer-draft-question") return ["Revise draft", "Create campaign workspace", "Add missing input"];
+  if (intent === "revise-draft") return ["Show revised draft", "Create campaign workspace"];
+  return ["Review draft", "Revise draft", "Create campaign workspace"];
+}
+
+function normalizeDraftPatch(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const patch = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (Array.isArray(raw)) {
+      patch[key] = raw.map((item) => stringValue(item)).filter(Boolean).slice(0, 12);
+    } else if (typeof raw === "string") {
+      patch[key] = raw.trim();
+    }
+  }
+  return patch;
+}
+
+function scrubHomeJargon(answer, draft, payload) {
+  const text = stringValue(answer);
+  if (!text) return draftAwareHomeAnswer(stringValue(payload?.question), draft, "answer-draft-question");
+  if (/\b(blocked|Risk lane|approval|H[1-4]|budgetAssumptions|timingAssumptions|missingInputs|sourceEvidence|kpiCandidates)\b/i.test(text)) {
+    return draftAwareHomeAnswer(stringValue(payload?.question), draft, inferHomeTurnIntent(payload, Boolean(payload?.active_draft)));
+  }
+  return text;
+}
+
+function buildHomeDraftFallback(payload) {
+  const prompt = stringValue(payload?.prompt) || stringValue(payload?.question) || "";
+  const promptWithoutUrls = stripUrls(prompt);
+  const evidence = Array.isArray(payload?.research_evidence) ? payload.research_evidence : [];
+  const evidenceFacts = evidence.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    return [
+      stringValue(item.title),
+      stringValue(item.summary),
+      ...(Array.isArray(item.facts) ? item.facts.map((fact) => stringValue(fact)) : []),
+    ].filter(Boolean);
+  });
+  const heroProduct = cleanSubject(extractCampaignSubject(prompt) || extractProductMention(prompt) || productFromEvidence(evidenceFacts) || "the product");
+  const isGlobal = /\b(global|all markets|all the markets|worldwide)\b/i.test(prompt);
+  const budgetDeferred = /\bbudget\b/i.test(prompt) && /\b(after|defined after|to be defined|later)\b/i.test(prompt);
+  const campaignName = sentenceCase(heroProduct === "the product" ? "New campaign" : `${heroProduct} campaign`);
+  const draft = {
+    campaignName,
+    heroProduct,
+    objective: `Create qualified demand for ${heroProduct}.`,
+    audience: /\bcold cut\b/i.test(`${prompt} ${evidenceFacts.join(" ")}`)
+      ? ["Contractors", "Installers", "Trade buyers"]
+      : ["Contractors", "Specifiers"],
+    markets: isGlobal ? ["Global markets"] : ["Target markets TBD"],
+    locales: isGlobal ? ["Market-localized variants TBD"] : ["Locale variants TBD"],
+    channels: hasExplicitChannelSignal(promptWithoutUrls) ? inferHomeChannels(promptWithoutUrls) : defaultHomeChannels(),
+    kpiCandidates: ["Qualified HOL visits", "Campaign engagement", "Downstream conversion readiness"],
+    budgetAssumptions: budgetDeferred
+      ? "To be defined after Campaign Planning and Content Planning review"
+      : "Budget owner and investment range need confirmation",
+    timingAssumptions: "Launch timing to be confirmed with campaign owner and market leaders",
+    missingInputs: ["Market priority", "Budget owner", "Timing owner", "Claim evidence"],
+    sourceEvidence: uniqueStrings(evidenceFacts).slice(0, 6),
+  };
+  return {
+    answer: fallbackHomeAnswer(draft),
+    draft,
+    suggested_actions: ["Review brief", "Add missing inputs", "Switch to Create when ready"],
+  };
+}
+
+function normalizeHomeDraft(value, fallback, payload = {}) {
+  const record = value && typeof value === "object" ? value : {};
+  const prompt = stringValue(payload?.prompt) || stringValue(payload?.question);
+  const modelChannels = normalizeHomeChannels(record.channels, fallback.channels);
+  return {
+    campaignName: stringValue(record.campaignName) || fallback.campaignName,
+    heroProduct: cleanSubject(stringValue(record.heroProduct) || fallback.heroProduct),
+    objective: stringValue(record.objective) || fallback.objective,
+    audience: stringArray(record.audience, fallback.audience).slice(0, 8),
+    markets: stringArray(record.markets, fallback.markets).slice(0, 12),
+    locales: stringArray(record.locales, fallback.locales).slice(0, 12),
+    channels: hasExplicitChannelSignal(prompt) ? modelChannels : fallback.channels,
+    kpiCandidates: stringArray(record.kpiCandidates, fallback.kpiCandidates).slice(0, 8),
+    budgetAssumptions: normalizeBudgetAssumption(record.budgetAssumptions, fallback.budgetAssumptions),
+    timingAssumptions: stringValue(record.timingAssumptions) || fallback.timingAssumptions,
+    missingInputs: stringArray(record.missingInputs, fallback.missingInputs).slice(0, 10),
+    sourceEvidence: stringArray(record.sourceEvidence, fallback.sourceEvidence).slice(0, 10),
+  };
+}
+
+function hasExplicitChannelSignal(prompt) {
+  return /\b(channel|email|paid|linkedin|google|meta|social|sprinklr|contentful|landing|website|hol|banner|sfmc)\b/i.test(stripUrls(prompt || ""));
+}
+
+function normalizeBudgetAssumption(value, fallback) {
+  const text = stringValue(value);
+  if (!text) return fallback;
+  if (/\b(to be defined|defined after|after campaign|after content|later)\b/i.test(text)) {
+    return "To be defined after Campaign Planning and Content Planning review";
+  }
+  return text;
+}
+
+function ensureHomeDraftAnswerEvidence(answer, draft) {
+  const evidence = Array.isArray(draft.sourceEvidence) ? draft.sourceEvidence.filter(Boolean).slice(0, 2) : [];
+  if (!evidence.length) return answer;
+  const lower = answer.toLowerCase();
+  const alreadyVisible = evidence.some((item) => lower.includes(String(item).slice(0, 24).toLowerCase()));
+  if (alreadyVisible) return answer;
+  return `${answer}\n\nWhat I found: ${evidence.join(" ")}`
+}
+
+function fallbackHomeAnswer(draft) {
+  return [
+    "I can shape this before creating the workspace. Here is a first version for review.",
+    `Campaign idea: ${draft.campaignName}.`,
+    `Objective: ${draft.objective}`,
+    `Market scope: ${draft.markets.join(", ")}.`,
+    `Audience starting point: ${draft.audience.join(", ")}.`,
+    `Budget: ${draft.budgetAssumptions}.`,
+    `Initial channel direction: ${draft.channels.join(", ")}.`,
+    "If this direction looks right, switch to Create and say \"proceed\". I will create the Campaign Planning draft for review.",
+  ].join("\n\n");
+}
+
+function inferHomeChannels(prompt) {
+  const text = String(prompt || "").toLowerCase();
+  const channels = [
+    text.includes("paid") || text.includes("linkedin") || text.includes("google") || text.includes("meta") ? "Paid Media" : undefined,
+    text.includes("email") ? "Email" : undefined,
+    text.includes("landing") || text.includes("website") || text.includes("promo") ? "HOL Landing Page" : undefined,
+    text.includes("social") || text.includes("sprinklr") || text.includes("hn") ? "Organic/HN" : undefined,
+  ].filter(Boolean);
+  return channels.length ? channels : defaultHomeChannels();
+}
+
+function defaultHomeChannels() {
+  return ["Paid Media", "Email", "HOL Landing Page", "Organic/HN"];
+}
+
+function normalizeHomeChannels(value, fallback) {
+  const channels = stringArray(value, fallback).flatMap((channel) => {
+    const text = channel.toLowerCase();
+    if (text.includes("paid") || text.includes("linkedin") || text.includes("google") || text.includes("meta")) return ["Paid Media"];
+    if (text.includes("email") || text.includes("sfmc")) return ["Email"];
+    if (text.includes("hol") || text.includes("landing") || text.includes("contentful")) return ["HOL Landing Page"];
+    if (text.includes("organic") || text.includes("social") || text.includes("hn") || text.includes("sprinklr")) return ["Organic/HN"];
+    if (text.includes("banner")) return ["Banner"];
+    return [];
+  });
+  return uniqueStrings(channels.length ? channels : fallback).slice(0, 6);
+}
+
+function stringArray(value, fallback) {
+  if (!Array.isArray(value)) return fallback;
+  const items = value.map((item) => stringValue(item)).filter(Boolean);
+  return items.length ? items : fallback;
+}
+
+function stringValue(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function extractProductMention(prompt) {
+  const match = String(prompt || "").match(/\b(TE\d{2}(?:-\d{2})?|TE\s?\d{2}(?:\s?AVR)?|SIW\s?6AT-A22|[A-Z]{2,5}\d{1,3}(?:-\d{1,3})?)\b/i);
+  return match?.[1]?.replace(/\s+/g, " ").toUpperCase() || "";
+}
+
+function extractCampaignSubject(prompt) {
+  const text = String(prompt || "");
+  const match = text.match(/\bcampaign\s+(?:for|about|around|of)\s+([^,.:\n]+)/i) || text.match(/\bfor\s+([^,.:\n]+?)(?:,\s*the products|\s+campaign|\s+that|\s+it should|$)/i);
+  return match?.[1] || "";
+}
+
+function stripUrls(value) {
+  return String(value || "").replace(/https?:\/\/\S+/gi, " ");
+}
+
+function productFromEvidence(facts) {
+  if (facts.join(" ").toLowerCase().includes("cold cut")) return "cold cut";
+  return "";
+}
+
+function cleanSubject(subject) {
+  return String(subject || "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\b(the products? you can check here|products? you can check here)\b/gi, "")
+    .replace(/\bit should\b[\s\S]*$/i, "")
+    .replace(/\s+/g, " ")
+    .replace(/[,.:\-]+$/g, "")
+    .trim() || "the product";
+}
+
+function sentenceCase(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\w\S*/g, (word) => word[0].toUpperCase() + word.slice(1).toLowerCase());
+}
+
+function summarizeHtmlEvidence(html) {
+  const cleanHtml = String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ");
+  const title = decodeHtml(firstMatch(cleanHtml, /<title[^>]*>([\s\S]*?)<\/title>/i)) || "Untitled page";
+  const description = decodeHtml(
+    firstMatch(cleanHtml, /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["'][^>]*>/i) ||
+      firstMatch(cleanHtml, /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["'][^>]*>/i),
+  );
+  const headings = Array.from(cleanHtml.matchAll(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi))
+    .map((match) => normalizeText(stripTags(match[1])))
+    .filter(Boolean);
+  const paragraphs = Array.from(cleanHtml.matchAll(/<(?:p|li|span|strong|div)[^>]*>([\s\S]*?)<\/(?:p|li|span|strong|div)>/gi))
+    .map((match) => normalizeText(stripTags(match[1])))
+    .filter((text) => text.length > 18 && !/^\{.*\}$/.test(text));
+  const facts = uniqueStrings([description, ...headings, ...paragraphs])
+    .filter((text) => /promo|offer|save|discount|cut|spark|smoke|safer|faster|cleaner|voucher|code|cordless|tool|metal|campaign|checkout|cart|20%|CUT20/i.test(text))
+    .slice(0, 10);
+  const fallbackFacts = uniqueStrings([description, ...headings, ...paragraphs]).slice(0, 8);
+  const usefulFacts = facts.length ? facts : fallbackFacts;
+  return {
+    title,
+    description,
+    facts: usefulFacts,
+    summary: uniqueStrings([title, description, ...usefulFacts]).filter(Boolean).slice(0, 8).join(" "),
+  };
+}
+
+function firstMatch(text, pattern) {
+  return text.match(pattern)?.[1] ?? "";
+}
+
+function stripTags(value) {
+  return String(value || "").replace(/<[^>]+>/g, " ");
+}
+
+function normalizeText(value) {
+  return decodeHtml(value).replace(/\s+/g, " ").trim();
+}
+
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function uniqueStrings(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const normalized = normalizeText(value);
+    if (!normalized || seen.has(normalized.toLowerCase())) continue;
+    seen.add(normalized.toLowerCase());
+    result.push(normalized);
+  }
+  return result;
 }
 
 function getPathname(req) {

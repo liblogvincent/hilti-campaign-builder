@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import { handleAgent, handleGateDecision, handleHealth, handleIntegrationPackage, handleOrchestrator, normalizeOrchestratorResponse } from "./panda-api.mjs";
+import { handleAgent, handleGateDecision, handleHealth, handleHomeDraft, handleHomeTurn, handleIntegrationPackage, handleOrchestrator, handleResearchUrl, normalizeHomeDraftResponse, normalizeHomeTurnResponse, normalizeOrchestratorResponse, researchUrl } from "./panda-api.mjs";
 import * as aiTransport from "./ai-transport.mjs";
 import { callJsonAgent, resolveProviderConfig, parseJsonObject } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
@@ -306,6 +306,266 @@ describe("panda api handlers", () => {
     expect(body.mode).toBe("fixture");
     expect(body.answer).toContain("H2");
     restoreEnvKey("DEEPSEEK_API_KEY", originalKey);
+  });
+
+  it("researches a campaign URL and returns usable page evidence", async () => {
+    const html = `
+      <html>
+        <head>
+          <title>Cold Cut Promo | Hilti Hong Kong</title>
+          <meta name="description" content="Metal Cutting Made Safer, Faster and Cleaner">
+          <script>window.secret = "ignore";</script>
+        </head>
+        <body>
+          <h1>Metal Cutting Made Safer, Faster and Cleaner</h1>
+          <p>Save 20% on cordless cold-cutting solutions with promo code CUT20.</p>
+          <p>Cold-cutting solutions help reduce sparks, smoke and finishing time.</p>
+        </body>
+      </html>`;
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => "text/html" },
+      text: async () => html,
+    }));
+
+    const evidence = await researchUrl("https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo", fetchImpl);
+
+    expect(fetchImpl).toHaveBeenCalledWith("https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo", expect.any(Object));
+    expect(evidence.ok).toBe(true);
+    expect(evidence.title).toBe("Cold Cut Promo | Hilti Hong Kong");
+    expect(evidence.summary).toContain("Metal Cutting Made Safer, Faster and Cleaner");
+    expect(evidence.summary).toContain("CUT20");
+    expect(evidence.summary).not.toContain("window.secret");
+  });
+
+  it("serves URL research through the API handler", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => "text/html" },
+      text: async () => "<title>Cold Cut</title><h1>Metal Cutting Made Safer</h1><p>20% off with CUT20.</p>",
+    }));
+    const res = createResponse();
+
+    await handleResearchUrl(createRequest("POST", { url: "https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo" }), res);
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.summary).toContain("CUT20");
+    globalThis.fetch = originalFetch;
+  });
+
+  it("normalizes a model-drafted Home brief with structured campaign fields", () => {
+    const result = normalizeHomeDraftResponse(
+      {
+        answer: "I researched the cold cut page and drafted a campaign brief for review before creating the workspace.",
+        draft: {
+          campaignName: "Cold Cut Global Campaign",
+          heroProduct: "Cold cut",
+          objective: "Drive safer metal cutting demand from trade buyers.",
+          audience: ["Contractors", "Installers", "Trade buyers"],
+          markets: ["Global markets"],
+          locales: ["Market-localized variants TBD"],
+          channels: ["Paid Media", "Email", "HOL Landing Page"],
+          kpiCandidates: ["Qualified HOL visits", "Promotion-code engagement"],
+          budgetAssumptions: "To be defined after Campaign Planning and Content Planning review",
+          timingAssumptions: "Market leaders will confirm launch waves after review.",
+          missingInputs: ["Market priority", "Budget owner", "Claim evidence"],
+          sourceEvidence: ["Hilti page says cleaner cuts and fewer sparks.", "Promo code CUT20 appears on the page."],
+        },
+        suggested_actions: ["Review brief", "Switch to Create when ready"],
+      },
+      {
+        prompt:
+          "I want a campaign for cold cut, the products you can check here https://www.hilti.com.hk/content/shop/promotions/local/cold-cut-promo and budget should be defined after campaign and content planning.",
+        research_evidence: [],
+      },
+      "deepseek",
+    );
+
+    expect(result.mode).toBe("deepseek");
+    expect(result.answer).toContain("review");
+    expect(result.answer).toContain("Hilti page says cleaner cuts");
+    expect(result.draft.heroProduct).toBe("Cold cut");
+    expect(result.draft.markets).toEqual(["Global markets"]);
+    expect(result.draft.channels).toContain("HOL Landing Page");
+    expect(result.draft.channels).toContain("Organic/HN");
+    expect(result.draft.budgetAssumptions).toBe("To be defined after Campaign Planning and Content Planning review");
+    expect(result.suggested_actions).toContain("Switch to Create when ready");
+  });
+
+  it("serves Home draft through DeepSeek with URL evidence and no template-only response", async () => {
+    const callJsonAgentSpy = vi.spyOn(aiTransport, "callJsonAgent").mockResolvedValueOnce({
+      mode: "deepseek",
+      answer: "I reviewed the Hilti cold cut page, captured the safer cleaner cutting proof points, and drafted a reviewable campaign brief.",
+      draft: {
+        campaignName: "Cold Cut Global Campaign",
+        heroProduct: "cold cut",
+        objective: "Create qualified demand for safer, cleaner metal cutting.",
+        audience: ["Contractors", "Installers", "Trade buyers"],
+        markets: ["Global markets"],
+        locales: ["Market-localized variants TBD"],
+        channels: ["Paid Media", "Email", "HOL Landing Page", "Organic/HN"],
+        kpiCandidates: ["Qualified HOL visits", "Promotion-code engagement"],
+        budgetAssumptions: "To be defined after Campaign Planning and Content Planning review",
+        timingAssumptions: "Launch waves to be agreed with market leaders.",
+        missingInputs: ["Market priority", "Budget owner"],
+        sourceEvidence: ["CUT20 appeared on the researched page."],
+      },
+      suggested_actions: ["Review brief", "Switch to Create when ready"],
+    });
+    const res = createResponse();
+
+    await handleHomeDraft(
+      createRequest("POST", {
+        prompt: "I want a campaign for cold cut",
+        research_evidence: [{ ok: true, title: "Cold Cut Promo | Hilti Hong Kong", summary: "CUT20 and cleaner cutting proof points." }],
+      }),
+      res,
+    );
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.mode).toBe("deepseek");
+    expect(body.answer).toContain("Hilti cold cut page");
+    expect(body.draft.heroProduct).toBe("cold cut");
+    expect(body.draft.sourceEvidence).toContain("CUT20 appeared on the researched page.");
+    expect(callJsonAgentSpy).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        prompt: "I want a campaign for cold cut",
+        research_evidence: expect.any(Array),
+      }),
+      systemPrompt: expect.stringContaining("draft the brief and initial plan"),
+    }));
+    callJsonAgentSpy.mockRestore();
+  });
+
+  it("answers Home follow-up questions from the active draft instead of workflow blockers", () => {
+    const result = normalizeHomeTurnResponse(
+      { answer: "The assumptions are in budgetAssumptions, timingAssumptions, and missingInputs." },
+      {
+        question: "where is the assumption?",
+        active_draft: {
+          campaignName: "Diamond Coring Demand Campaign",
+          heroProduct: "Hilti diamond coring products",
+          objective: "Create qualified demand for dust-controlled, precise coring solutions.",
+          audience: ["Contractors", "Installers", "Specifiers"],
+          markets: ["Global markets"],
+          locales: ["Market-localized variants TBD"],
+          channels: ["Paid Media", "Email", "HOL Landing Page", "Organic/HN"],
+          kpiCandidates: ["Qualified HOL visits", "Lead form completions"],
+          budgetAssumptions: "Budget to be defined after Campaign Planning and Content Planning review.",
+          timingAssumptions: "Launch window to be agreed with market leaders after plan review.",
+          missingInputs: ["Priority markets", "Budget owner", "Hero offer", "Claim evidence"],
+          sourceEvidence: ["User asked for Hilti diamond coring products."],
+        },
+      },
+      "fixture",
+    );
+
+    expect(result.answer).toContain("To be defined");
+    expect(result.answer).toContain("Launch window");
+    expect(result.answer).toContain("Priority markets");
+    expect(result.answer).not.toMatch(/\bblocked\b/i);
+    expect(result.answer).not.toContain("Risk lane");
+    expect(result.answer).not.toContain("budgetAssumptions");
+    expect(result.answer).not.toContain("missingInputs");
+    expect(result.answer).not.toMatch(/\bapproval\b/i);
+    expect(result.answer).not.toMatch(/\bH[1-4]\b/);
+    expect(result.draft.heroProduct).toBe("Hilti diamond coring products");
+    expect(result.intent).toBe("answer-draft-question");
+  });
+
+  it("serves Home turns through the action runtime contract", async () => {
+    const callJsonAgentSpy = vi.spyOn(aiTransport, "callJsonAgent").mockResolvedValueOnce({
+      mode: "deepseek",
+      answer: "Here are the current assumptions in the draft: global scope, market leaders refine priority markets, and budget follows the plan review.",
+      draft: {
+        campaignName: "Diamond Coring Demand Campaign",
+        heroProduct: "Hilti diamond coring products",
+        objective: "Create qualified demand for precise coring solutions.",
+        audience: ["Contractors", "Installers"],
+        markets: ["Global markets"],
+        locales: ["Market-localized variants TBD"],
+        channels: ["Paid Media", "Email", "HOL Landing Page", "Organic/HN"],
+        kpiCandidates: ["Qualified HOL visits"],
+        budgetAssumptions: "Budget follows plan review.",
+        timingAssumptions: "Market leaders confirm timing.",
+        missingInputs: ["Priority markets"],
+        sourceEvidence: ["User supplied product family."],
+      },
+      draftPatch: { missingInputs: ["Priority markets", "Hero offer"] },
+      suggested_actions: ["Revise draft", "Create campaign workspace"],
+      intent: "answer-draft-question",
+    });
+    const res = createResponse();
+
+    await handleHomeTurn(
+      createRequest("POST", {
+        question: "where are the assumptions?",
+        active_draft: {
+          campaignName: "Diamond Coring Demand Campaign",
+          heroProduct: "Hilti diamond coring products",
+          objective: "Create qualified demand for precise coring solutions.",
+          audience: ["Contractors"],
+          markets: ["Global markets"],
+          locales: ["Market-localized variants TBD"],
+          channels: ["Paid Media"],
+          kpiCandidates: ["Qualified HOL visits"],
+          budgetAssumptions: "Budget follows plan review.",
+          timingAssumptions: "Market leaders confirm timing.",
+          missingInputs: ["Priority markets"],
+          sourceEvidence: ["User supplied product family."],
+        },
+      }),
+      res,
+    );
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.mode).toBe("deepseek");
+    expect(body.answer).toContain("current assumptions");
+    expect(body.draftPatch.missingInputs).toContain("Hero offer");
+    expect(body.suggested_actions).toContain("Create campaign workspace");
+    expect(callJsonAgentSpy).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ question: "where are the assumptions?" }),
+      systemPrompt: expect.stringContaining("campaign-building agent"),
+    }));
+    callJsonAgentSpy.mockRestore();
+  });
+
+  it("starts a new Home draft when the user gives a new campaign brief even if an older draft exists", () => {
+    const result = normalizeHomeTurnResponse(
+      {},
+      {
+        question: "I want a campaign for cold cut, it should be launched in global markets and budget should be defined after campaign and content planning.",
+        active_draft: {
+          campaignName: "Diamond Coring Demand Campaign",
+          heroProduct: "Hilti diamond coring products",
+          objective: "Create qualified demand for precise coring solutions.",
+          audience: ["Contractors", "Installers"],
+          markets: ["DACH"],
+          locales: ["de-DE"],
+          channels: ["Paid Media"],
+          kpiCandidates: ["Qualified HOL visits"],
+          budgetAssumptions: "Budget follows plan review.",
+          timingAssumptions: "Market leaders confirm timing.",
+          missingInputs: ["Priority markets"],
+          sourceEvidence: ["User supplied product family."],
+        },
+      },
+      "fixture",
+    );
+
+    expect(result.intent).toBe("draft-brief");
+    expect(result.draft.heroProduct).toBe("cold cut");
+    expect(result.draft.markets).toEqual(["Global markets"]);
+    expect(result.draft.budgetAssumptions).toBe("To be defined after Campaign Planning and Content Planning review");
+    expect(result.answer).toContain("cold cut");
+    expect(result.answer).not.toContain("Diamond");
   });
 
   it("keeps fixture orchestrator behavior when runtime mode is local", async () => {
