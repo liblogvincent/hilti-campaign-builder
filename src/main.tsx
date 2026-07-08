@@ -7,6 +7,7 @@ import {
   BookOpen,
   Check,
   ChevronRight,
+  Copy,
   Download,
   FileUp,
   Flag,
@@ -1886,7 +1887,10 @@ function WorkflowShell({
           objects={planningObjects}
           readiness={planningReadiness}
           requirements={contentRequirements}
+          deliverablePatches={deliverablePatches}
+          agentMessages={messages}
           onApplyFeedback={onApplyCampaignPlanningFeedback}
+          onRequestArtifactRevision={(deliverable) => onAsk("campaign-planning", artifactRevisionPrompt(deliverable))}
           onUpdate={onUpdatePlanningObject}
         />
       )}
@@ -1942,21 +1946,35 @@ function CampaignPlanningWorkspace({
   objects,
   readiness,
   requirements,
+  deliverablePatches,
+  agentMessages,
   onApplyFeedback,
+  onRequestArtifactRevision,
   onUpdate
 }: {
   plan: CampaignPlan;
   objects: PlanningWorkObject[];
   readiness: PlanningReadiness;
   requirements: ContentRequirement[];
+  deliverablePatches: Record<string, Partial<RmbDeliverable>>;
+  agentMessages: AgentMessage[];
   onApplyFeedback: (proposal: LeadershipFeedbackProposal) => void;
+  onRequestArtifactRevision: (deliverable: RmbDeliverable) => void;
   onUpdate: (id: string, status: WorkObjectStatus, comment: string) => void;
 }) {
-  const [tab, setTab] = useState<"work" | "preview" | "feedback" | "versions">("work");
+  const [tab, setTab] = useState<"deliverables" | "work" | "preview" | "feedback" | "versions">("deliverables");
   const [versions, setVersions] = useState<string[]>([]);
   const sections = objects.filter((item) => item.id !== "missing-inputs");
   const missing = objects.find((item) => item.id === "missing-inputs");
   const slides = buildPlanPreviewSlides("campaign-planning", plan, requirements);
+  const deliverables = useMemo(
+    () =>
+      campaignPlanningDeliverables(plan).map((item) => ({
+        ...item,
+        ...(deliverablePatches[item.id] ?? {})
+      })),
+    [plan, deliverablePatches]
+  );
 
   function downloadDeck() {
     const filename = simulatedPlanDeckFilename("campaign-planning", plan.campaignId, versions.length + 1);
@@ -1966,21 +1984,17 @@ function CampaignPlanningWorkspace({
 
   return (
     <div className="campaignPlanningBoard">
-      <section className="planningGateStrip" aria-label="Campaign plan readiness">
-        <div>
-          <small>Plan readiness</small>
-          <strong>{readiness.approved}/{readiness.total} work objects approved</strong>
-          <span>{readiness.blocked} blocked · {readiness.revision} revision requested</span>
-        </div>
-        <div className="readinessMeter">
-          <span style={{ width: `${readiness.pct}%` }} />
-        </div>
-        <button className="secondary" onClick={() => objects.forEach((item) => onUpdate(item.id, "approved", "Approved for the campaign plan."))}>
-          <Check size={16} /> Approve ready plan
-        </button>
-      </section>
-
       <PlanPacketTabs active={tab} onChange={setTab} />
+
+      {tab === "deliverables" && (
+        <RmbDeliverablesPanel
+          title="Campaign planning deliverables"
+          description="Campaign Planning carries the RMB-requested outputs for MarCom, paid media, HOL journey mapping, email strategy, and organic/Hilti Network before Content Planning builds the requirement matrix."
+          deliverables={deliverables}
+          agentMessages={agentMessages}
+          onRevise={onRequestArtifactRevision}
+        />
+      )}
 
       {tab === "preview" && (
         <PlanPreviewPanel
@@ -2004,11 +2018,25 @@ function CampaignPlanningWorkspace({
       {tab === "versions" && <VersionHistoryPanel versions={versions} empty="No leadership deck has been shared yet." />}
 
       {tab === "work" && (
+      <>
+      <section className="planningGateStrip" aria-label="Campaign plan readiness">
+        <div>
+          <small>Planning object queue</small>
+          <strong>{readiness.approved}/{readiness.total} planning objects marked ready</strong>
+          <span>{readiness.blocked} blocked · {readiness.revision} revision requested</span>
+        </div>
+        <div className="readinessMeter">
+          <span style={{ width: `${readiness.pct}%` }} />
+        </div>
+        <button className="secondary" onClick={() => objects.forEach((item) => onUpdate(item.id, "approved", "Marked ready for the campaign plan."))}>
+          <Check size={16} /> Mark queue ready
+        </button>
+      </section>
       <div className="planningWorkspaceGrid">
         <section className="planDocument">
           <div className="planDocumentHeader">
             <div>
-              <small>Campaign plan · approved direction</small>
+              <small>Campaign plan source data</small>
               <h2>{plan.name}</h2>
               <p>{plan.heroProduct} · {plan.markets.join(", ")} · {plan.budget}</p>
             </div>
@@ -2043,7 +2071,7 @@ function CampaignPlanningWorkspace({
 
         <aside className="planningObjectRows">
           <div className="objectListHeader">
-            <small>Work objects</small>
+            <small>Planning object queue</small>
             <strong>Planning queue</strong>
           </div>
           {objects.map((item) => (
@@ -2060,6 +2088,7 @@ function CampaignPlanningWorkspace({
           )}
         </aside>
       </div>
+      </>
       )}
     </div>
   );
@@ -2118,13 +2147,14 @@ function PlanningObjectRow({
 function PlanPacketTabs({
   active,
   onChange,
-  workLabel = "Work Objects"
+  workLabel = "Planning Object Queue"
 }: {
-  active: "work" | "preview" | "feedback" | "versions";
-  onChange: (tab: "work" | "preview" | "feedback" | "versions") => void;
+  active: "deliverables" | "work" | "preview" | "feedback" | "versions";
+  onChange: (tab: "deliverables" | "work" | "preview" | "feedback" | "versions") => void;
   workLabel?: string;
 }) {
   const tabs = [
+    { id: "deliverables" as const, label: "RMB Deliverables" },
     { id: "work" as const, label: workLabel },
     { id: "preview" as const, label: "Plan Preview" },
     { id: "feedback" as const, label: "Leadership Feedback" },
@@ -2246,13 +2276,15 @@ function RmbDeliverablesPanel({
   description,
   deliverables,
   agentMessages = [],
-  onRevise
+  onRevise,
+  onOpenFigmaBoard
 }: {
   title: string;
   description: string;
   deliverables: RmbDeliverable[];
   agentMessages?: AgentMessage[];
   onRevise?: (deliverable: RmbDeliverable) => void;
+  onOpenFigmaBoard?: () => void;
 }) {
   const [selectedId, setSelectedId] = useState(deliverables[0]?.id ?? "");
   const detailRef = useRef<HTMLElement | null>(null);
@@ -2279,7 +2311,7 @@ function RmbDeliverablesPanel({
           <article className={item.id === selectedDeliverable?.id ? "rmbDeliverableCard selected" : "rmbDeliverableCard"} key={item.id}>
             <div className="rmbDeliverableTop">
               <div>
-                <small>{item.workspace} · {item.gate}</small>
+                <small>{deliverableStageLabel(item)}</small>
                 <h3>{item.title}</h3>
               </div>
               <span className={`objectStatus ${item.status}`}>{item.status}</span>
@@ -2366,10 +2398,100 @@ function RmbDeliverablesPanel({
               </div>
             </section>
           </div>
+          {selectedDeliverable.id === "cp4-figma-mapping" && (
+            <FigmaArtifactBrief deliverable={selectedDeliverable} onOpenFigmaBoard={onOpenFigmaBoard} />
+          )}
         </section>
       )}
     </section>
   );
+}
+
+function FigmaArtifactBrief({
+  deliverable,
+  onOpenFigmaBoard
+}: {
+  deliverable: RmbDeliverable;
+  onOpenFigmaBoard?: () => void;
+}) {
+  const prompt = buildFigmaArtifactPrompt(deliverable);
+  const [copied, setCopied] = useState(false);
+
+  async function copyPrompt() {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      const blob = new Blob([prompt], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "panda-figma-board-prompt.txt";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  return (
+    <section className="figmaArtifactBrief">
+      <div>
+        <small>Panda to Figma instruction</small>
+        <h4>Prompt for Figma placeholders</h4>
+        <p>
+          Panda will send this brief plus the structured content matrix to Figma MCP. Figma REST can verify files and add comments; native frame creation needs the MCP canvas bridge or a Figma plugin.
+        </p>
+      </div>
+      <pre>{prompt}</pre>
+      <div className="figmaArtifactActions">
+        <button className="deliverableRevise" onClick={copyPrompt}>
+          <Copy size={15} /> {copied ? "Copied" : "Copy Figma prompt"}
+        </button>
+        <button className="deliverableOpen" onClick={onOpenFigmaBoard}>
+          <PlugZap size={15} /> Open Figma sync workspace
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function buildFigmaArtifactPrompt(deliverable: RmbDeliverable) {
+  const detailLines = deliverable.artifactDetails.map((detail) => `- ${detail.label}: ${detail.value}`);
+  const sectionLines = deliverable.sections.map((section) => `- ${section}`);
+  const inputLines = deliverable.sourceInputs.map((input) => `- ${input}`);
+  return [
+    `Create a Figma content planning board for: ${deliverable.title}.`,
+    "",
+    "Goal:",
+    "Turn the Panda content planning matrix into an editable Figma production board with frame groups, placeholder cards, asset annotations, and handoff notes.",
+    "",
+    "Create frame groups for the campaign channels and content workflow:",
+    ...sectionLines,
+    "",
+    "For every placeholder card, include:",
+    "- Asset title",
+    "- Channel and format ratio",
+    "- Locale or master variant",
+    "- Owner and rollout target",
+    "- Panda content object link or ID",
+    "- Copy/design/compliance notes",
+    "- Status for review, revision, approved, or blocked",
+    "",
+    "Use these Panda artifact details:",
+    ...detailLines,
+    "",
+    "Use these source inputs:",
+    ...inputLines,
+    "",
+    "Visual direction:",
+    "- Use Hilti red #d2051e as the primary accent.",
+    "- Keep the board clean, operational, and easy for content creators to scan.",
+    "- Separate master assets, locale variants, compliance notes, and production-ready handoff.",
+    "- Prefer editable native Figma frames and text layers, not a flat screenshot.",
+    "",
+    "Expected output:",
+    "A Figma board with editable frames and placeholders that can be synced back to Panda as the content planning source of truth."
+  ].join("\n");
 }
 
 function simulateRmbDeliverableDownload(deliverable: RmbDeliverable) {
@@ -2380,7 +2502,7 @@ function simulateRmbDeliverableDownload(deliverable: RmbDeliverable) {
     `Prototype ${primaryFormat} preview: ${deliverable.title}`,
     "",
     `Workspace: ${deliverable.workspace}`,
-    `Gate: ${deliverable.gate}`,
+    `Review stage: ${deliverableStageLabel(deliverable)}`,
     `Owner: ${deliverable.owner}`,
     `Requested by: ${deliverable.requestedBy}`,
     `Handoff target: ${deliverable.handoffTarget}`,
@@ -2408,6 +2530,14 @@ function simulateRmbDeliverableDownload(deliverable: RmbDeliverable) {
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function deliverableStageLabel(deliverable: RmbDeliverable) {
+  if (deliverable.workspace === "Campaign Planning") return "Campaign Planning";
+  if (deliverable.workspace === "Content Planning") return "Content Planning";
+  if (deliverable.workspace === "Content") return "Content Production";
+  if (deliverable.workspace === "Rollout") return "Campaign Rollout";
+  return deliverable.workspace;
 }
 
 function simulatePrototypeDeckDownload(filename: string, slides: PlanPreviewSlide[]) {
@@ -2441,7 +2571,7 @@ function ContentPlanningBoard({
   onRequestArtifactRevision: (deliverable: RmbDeliverable) => void;
 }) {
   const bridge = useMemo(() => buildContentPlanningBridge(plan, requirements), [plan, requirements]);
-  const [tab, setTab] = useState<"concept" | "requirements" | "storyboard" | "figma" | "preview" | "feedback" | "versions">("concept");
+  const [tab, setTab] = useState<"deliverables" | "requirements" | "figma" | "preview" | "feedback" | "versions">("deliverables");
   const [approvals, setApprovals] = useState<Record<keyof ContentPlanningBridge, ContentPlanningApprovalStatus>>({
     creativeConcept: bridge.creativeConcept.status,
     requirements: bridge.requirements.status,
@@ -2486,27 +2616,30 @@ function ContentPlanningBoard({
 
       <section className={readiness.readyForH2 ? "cpReadiness ready" : "cpReadiness"}>
         <div>
-          <small>H2 readiness</small>
-          <strong>{readiness.approved}/4 CP packages approved</strong>
-          <p>{readiness.readyForH2 ? "Final H2 approval is ready." : `Pending before H2: ${readiness.pending.join(", ")}`}</p>
+          <small>Content review readiness</small>
+          <strong>{readiness.approved}/4 content packages approved</strong>
+          <p>{readiness.readyForH2 ? "Final content review is ready." : `Pending before review: ${readiness.pending.join(", ")}`}</p>
         </div>
         <button disabled={!readiness.readyForH2}>
-          <Check size={16} /> Final H2 approval
+          <Check size={16} /> Final content review
         </button>
       </section>
 
-      <RmbDeliverablesPanel
-        title="CP1-CP4 content planning outputs"
-        description="Content Planning turns the H1 plan into approved creative concept, requirements matrix, storyboard, and Figma mapping artifacts before Content starts production."
-        deliverables={deliverables}
-        agentMessages={agentMessages}
-        onRevise={onRequestArtifactRevision}
-      />
+      {tab === "deliverables" && (
+        <RmbDeliverablesPanel
+          title="Content planning deliverables"
+          description="Content Planning turns the campaign plan into approved creative concept, requirements matrix, storyboard, and Figma mapping artifacts before Content starts production."
+          deliverables={deliverables}
+          agentMessages={agentMessages}
+          onRevise={onRequestArtifactRevision}
+          onOpenFigmaBoard={() => setTab("figma")}
+        />
+      )}
 
       {tab === "preview" && (
         <PlanPreviewPanel
-          title="H2 Content Plan Preview"
-          description="Slide-style leadership preview of the content matrix, Figma mapping, localization, and H2 ask."
+          title="Content Plan Preview"
+          description="Slide-style leadership preview of the content matrix, Figma mapping, localization, and leadership ask."
           slides={slides}
           onDownload={downloadDeck}
         />
@@ -2519,23 +2652,20 @@ function ContentPlanningBoard({
             if (proposal.changes.some((change) => change.id === "add-mocn-content")) {
               onApplyInstruction(feedback);
             }
-            setVersions((current) => [`Leadership feedback applied to H2 content plan · ${proposal.summary}`, ...current]);
+            setVersions((current) => [`Leadership feedback applied to content plan · ${proposal.summary}`, ...current]);
           }}
         />
       )}
 
       {tab === "versions" && <VersionHistoryPanel versions={versions} empty="No content planning deck has been shared yet." />}
 
-      {tab === "concept" && (
-        <CreativeConceptPanel packageData={approvedBridge.creativeConcept} onUpdate={(status) => updateApproval("creativeConcept", status)} />
-      )}
-
-      {tab === "storyboard" && (
-        <StoryboardPanel packageData={approvedBridge.storyboard} onUpdate={(status) => updateApproval("storyboard", status)} />
-      )}
-
       {tab === "figma" && (
-        <FigmaBoardPanel packageData={approvedBridge.figmaBoard} onUpdate={(status) => updateApproval("figmaBoard", status)} />
+        <FigmaBoardPanel
+          packageData={approvedBridge.figmaBoard}
+          plan={plan}
+          requirements={requirements}
+          onUpdate={(status) => updateApproval("figmaBoard", status)}
+        />
       )}
 
       {tab === "requirements" && (
@@ -2543,7 +2673,7 @@ function ContentPlanningBoard({
       <section className="handoffSourcePanel">
         <div>
           <small>Input from Campaign Planning</small>
-          <h2>H1 plan is the source for this matrix</h2>
+          <h2>Campaign plan is the source for this matrix</h2>
           <p>
             Panda reads the approved campaign direction, channels, locales, and rollout targets, then creates the content requirements that the Content workspace will build and approve piece by piece.
           </p>
@@ -2600,13 +2730,12 @@ function ContentPlanningTabs({
   active,
   onChange
 }: {
-  active: "concept" | "requirements" | "storyboard" | "figma" | "preview" | "feedback" | "versions";
-  onChange: (tab: "concept" | "requirements" | "storyboard" | "figma" | "preview" | "feedback" | "versions") => void;
+  active: "deliverables" | "requirements" | "figma" | "preview" | "feedback" | "versions";
+  onChange: (tab: "deliverables" | "requirements" | "figma" | "preview" | "feedback" | "versions") => void;
 }) {
   const tabs = [
-    ["concept", "Creative Concept"],
+    ["deliverables", "RMB Deliverables"],
     ["requirements", "Requirements Matrix"],
-    ["storyboard", "Storyboard"],
     ["figma", "Figma Board"],
     ["preview", "Plan Preview"],
     ["feedback", "Leadership Feedback"],
@@ -2668,14 +2797,229 @@ function StoryboardPanel({ packageData, onUpdate }: { packageData: ContentPlanni
   );
 }
 
-function FigmaBoardPanel({ packageData, onUpdate }: { packageData: ContentPlanningBridge["figmaBoard"]; onUpdate: (status: ContentPlanningApprovalStatus) => void }) {
+type FigmaSyncResult = {
+  ok: boolean;
+  mode?: "create" | "update";
+  capability?: string;
+  warning?: string;
+  error?: string;
+  fileName?: string;
+  fileUrl?: string;
+  commentId?: string;
+  nextAction?: string;
+  manifest?: {
+    frameCount: number;
+    placeholderCount: number;
+  };
+  mcp?: {
+    ok: boolean;
+    tool?: string;
+    error?: string;
+  } | null;
+};
+
+type IntegrationStatus = {
+  deepseek?: string;
+  figma?: string;
+  figma_mcp?: string;
+  provider?: string;
+  mcp?: {
+    configured: boolean;
+    authenticated: boolean;
+    status: string;
+    tool?: string;
+    remote?: boolean;
+  };
+  connection?: {
+    authenticated: boolean;
+    source?: string;
+    updatedAt?: string;
+  };
+};
+
+function FigmaBoardPanel({
+  packageData,
+  plan,
+  requirements,
+  onUpdate
+}: {
+  packageData: ContentPlanningBridge["figmaBoard"];
+  plan: CampaignPlan;
+  requirements: ContentRequirement[];
+  onUpdate: (status: ContentPlanningApprovalStatus) => void;
+}) {
+  const defaultTarget = packageData.figmaUrl && !packageData.figmaUrl.includes("placeholder") ? packageData.figmaUrl : "";
+  const [figmaTarget, setFigmaTarget] = useState(defaultTarget);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncResult, setSyncResult] = useState<FigmaSyncResult | null>(null);
+  const [syncError, setSyncError] = useState("");
+  const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
+  const activeFigmaUrl = syncResult?.fileUrl || figmaTarget || defaultTarget;
+  const canOpenFigma = /^https:\/\/(www\.)?figma\.com\//i.test(activeFigmaUrl);
+  const mcpAuthenticated = integrationStatus?.mcp?.authenticated || integrationStatus?.figma_mcp === "configured";
+  const mcpConfigured = integrationStatus?.mcp?.configured || integrationStatus?.figma_mcp === "configured" || integrationStatus?.figma_mcp === "auth-required";
+  const mcpStatusLabel = mcpAuthenticated ? "MCP ready" : mcpConfigured ? "Connect Figma MCP" : "MCP setup required";
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/integrations/figma/mcp-status")
+      .then((response) => response.json())
+      .then((body: IntegrationStatus) => {
+        if (active) setIntegrationStatus(body);
+      })
+      .catch(() => {
+        if (active) setIntegrationStatus({ figma_mcp: "unknown" });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function buildFigmaPayload(mode: "create" | "update", syncCanvas = false) {
+    return {
+      mode,
+      sync_canvas: syncCanvas,
+      figma_url: figmaTarget.trim(),
+      campaign_id: plan.campaignId,
+      campaign_plan: {
+        campaignId: plan.campaignId,
+        name: plan.name,
+        heroProduct: plan.heroProduct,
+        markets: plan.markets,
+        locales: plan.locales,
+        audience: plan.audience,
+        channels: plan.channels.map((channel) => channel.name),
+      },
+      content_requirements: requirements.map((item) => ({
+        id: item.id,
+        title: item.title,
+        channel: item.channel,
+        assetType: item.assetType,
+        locale: item.locale,
+        owner: item.owner,
+        rolloutTarget: item.rolloutTarget,
+      })),
+    };
+  }
+
+  async function syncToFigma(mode: "create" | "update", syncCanvas = false) {
+    if (syncCanvas && !mcpAuthenticated) {
+      setSyncResult({
+        ok: false,
+        mode,
+        capability: "mcp-not-configured",
+        warning: "Native Figma frame creation needs authenticated Figma remote MCP. Connect Figma MCP for Panda on the server, then retry.",
+        manifest: {
+          frameCount: new Set(requirements.map((item) => item.channel)).size,
+          placeholderCount: requirements.length
+        },
+        mcp: {
+          ok: false,
+          error: "Figma MCP is not authenticated for Panda."
+        }
+      });
+      return;
+    }
+    setSyncBusy(true);
+    setSyncError("");
+    try {
+      const response = await fetch("/api/integrations/figma", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...buildFigmaPayload(mode, syncCanvas),
+        }),
+      });
+      const body = (await response.json()) as FigmaSyncResult;
+      if (!response.ok && response.status !== 202) {
+        throw new Error(body.error || "Figma sync failed");
+      }
+      setSyncResult(body);
+      if (body.ok) onUpdate("in-review");
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : "Figma sync failed");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function createBoardViaMcp() {
+    setSyncBusy(true);
+    setSyncError("");
+    try {
+      const response = await fetch("/api/integrations/figma/create-board", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildFigmaPayload("create", true)),
+      });
+      const body = (await response.json()) as FigmaSyncResult;
+      setSyncResult(body);
+      if (!response.ok) {
+        setSyncError(body.error || "Figma MCP board creation needs authentication");
+        return;
+      }
+      if (body.ok) onUpdate("in-review");
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : "Figma MCP board creation failed");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  function connectFigmaMcp() {
+    window.location.href = "/api/integrations/figma/connect";
+  }
+
   return (
     <section className="cpPackagePanel">
       <PackageHeader storyId={packageData.storyId} title={packageData.title} status={packageData.status} onUpdate={onUpdate} />
       <div className="figmaActionBar">
-        <button><Sparkles size={16} /> Create Figma Mapping</button>
-        <button className="secondary" onClick={() => window.open(packageData.figmaUrl, "_blank", "noopener,noreferrer")}>Open Figma</button>
-        <span>{packageData.mappingStatus}</span>
+        <label className="figmaTargetField">
+          <span>Figma file URL or key</span>
+          <input
+            value={figmaTarget}
+            onChange={(event) => setFigmaTarget(event.target.value)}
+            placeholder="Paste an existing Figma file URL to sync"
+          />
+        </label>
+        <button disabled={syncBusy || !figmaTarget.trim()} onClick={() => syncToFigma("update")}>
+          <PlugZap size={16} /> {syncBusy ? "Syncing..." : "Sync to Figma"}
+        </button>
+        <button
+          className="secondary"
+          disabled={syncBusy || !mcpConfigured}
+          onClick={mcpAuthenticated ? createBoardViaMcp : connectFigmaMcp}
+          title={!mcpConfigured ? "Configure Figma remote MCP first." : mcpAuthenticated ? "Create native Figma frames through MCP" : "Connect and authenticate Figma remote MCP for Panda."}
+        >
+          <Sparkles size={16} /> {mcpAuthenticated ? "Create board via MCP" : mcpStatusLabel}
+        </button>
+        <button
+          className="secondary"
+          disabled={!canOpenFigma}
+          onClick={() => canOpenFigma && window.open(activeFigmaUrl, "_blank", "noopener,noreferrer")}
+        >
+          Open Figma
+        </button>
+        <span>{packageData.mappingStatus.replaceAll("-", " ")}</span>
+      </div>
+      <div className={syncResult?.ok ? "figmaSyncStatus ok" : "figmaSyncStatus"}>
+        <strong>{syncResult?.ok ? (syncResult.mcp?.ok ? "Figma board created" : "Figma comment synced") : "RMB Figma workflow"}</strong>
+        <p>
+          {syncResult?.ok
+            ? syncResult.mcp?.ok
+              ? `Created or updated ${syncResult.manifest?.placeholderCount ?? requirements.length} native placeholders in ${syncResult.fileName || "the selected Figma file"}.`
+              : `Synced ${syncResult.manifest?.placeholderCount ?? requirements.length} placeholders into ${syncResult.fileName || "the selected Figma file"} as a Figma comment${syncResult.commentId ? ` (${syncResult.commentId})` : ""}. This does not create canvas frames.`
+            : syncResult?.warning || syncError || "Paste an existing Figma file to create a real Panda mapping comment. Connect authenticated Figma remote MCP for native frame creation."}
+        </p>
+        {integrationStatus && (
+          <small>
+            REST: connected · MCP canvas: {mcpAuthenticated ? "authenticated" : mcpConfigured ? "auth required" : "not configured"}
+          </small>
+        )}
+        {syncResult?.mcp && (
+          <small>{syncResult.mcp.ok ? `MCP tool called: ${syncResult.mcp.tool}` : `MCP not completed: ${syncResult.mcp.error}`}</small>
+        )}
+        {syncResult?.nextAction && <small>{syncResult.nextAction}</small>}
       </div>
       <div className="figmaBoardMock">
         {packageData.frames.map((frame) => (
@@ -2696,7 +3040,7 @@ function PackageHeader({ storyId, title, status, onUpdate }: { storyId: string; 
   return (
     <header className="cpPackageHeader">
       <div>
-        <small>{storyId} object-level approval</small>
+        <small>Review status</small>
         <h2>{title}</h2>
       </div>
       <ObjectApprovalStrip status={status} onUpdate={onUpdate} />
@@ -2908,7 +3252,7 @@ function workflowSuggestionsForView(view: AppView) {
   }
   if (view === "content-planning") {
     return [
-      { label: "Build matrix", prompt: "Expand the content planning matrix from the approved campaign plan." },
+      { label: "Create matrix", prompt: "Expand the content planning matrix from the approved campaign plan." },
       { label: "Check Figma", prompt: "Identify which planned assets need Figma layout mapping evidence." },
       { label: "Locale gaps", prompt: "Find missing locale variants and owners for the content plan." }
     ];
@@ -2987,7 +3331,7 @@ function AgentPanel({
         {messages.length === 0 && (
           <article className="message agent">
             <b>Panda</b>
-            <p>Ready to plan, build, revise, and prepare gate evidence for this workspace.</p>
+            <p>Ready to draft, revise, explain status, and prepare review evidence for this workspace.</p>
           </article>
         )}
         {messages.slice(-5).map((message) => (
@@ -3024,7 +3368,7 @@ function AgentPanel({
             ))}
           </div>
         )}
-        <textarea value={agentInput} onChange={(event) => onAgentInputChange(event.target.value)} placeholder="Ask Panda to plan, revise, or build..." />
+        <textarea value={agentInput} onChange={(event) => onAgentInputChange(event.target.value)} placeholder="Ask Panda to draft, revise, or explain..." />
         <div className="composerToolbar">
           <input ref={fileRef} type="file" multiple onChange={(event) => addAttachments(event.target.files)} />
           <div className="composerTools">

@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import { handleAgent, handleGateDecision, handleHealth, handleHomeDraft, handleHomeTurn, handleIntegrationPackage, handleOrchestrator, handleResearchUrl, normalizeHomeDraftResponse, normalizeHomeTurnResponse, normalizeOrchestratorResponse, researchUrl } from "./panda-api.mjs";
+import { handleAgent, handleFigmaIntegration, handleFigmaMcpCreateBoard, handleFigmaMcpStatus, handleFigmaOAuthCallback, handleFigmaOAuthConnect, handleGateDecision, handleHealth, handleHomeDraft, handleHomeTurn, handleIntegrationPackage, handleOrchestrator, handleResearchUrl, normalizeHomeDraftResponse, normalizeHomeTurnResponse, normalizeOrchestratorResponse, researchUrl } from "./panda-api.mjs";
 import * as aiTransport from "./ai-transport.mjs";
 import { callJsonAgent, resolveProviderConfig, parseJsonObject } from "./ai-transport.mjs";
 import { getAgentDefinition } from "./agent-registry.mjs";
@@ -1519,6 +1519,200 @@ describe("panda api handlers", () => {
     expect(res.status).toBe(200);
     expect(body.artifacts.some((artifact) => artifact.type === "publish-manifest")).toBe(true);
   });
+
+  it("syncs content planning requirements to an existing Figma file through the serverless handler", async () => {
+    const originalToken = process.env.FIGMA_TOKEN;
+    const originalFetch = globalThis.fetch;
+    process.env.FIGMA_TOKEN = "figd_test";
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      if (String(url).endsWith("/files/AbCd1234EFgh")) {
+        return {
+          ok: true,
+          json: async () => ({ name: "RMB Content Planning Board" }),
+        };
+      }
+      if (String(url).endsWith("/files/AbCd1234EFgh/comments")) {
+        return {
+          ok: true,
+          json: async () => ({ id: "comment_456" }),
+        };
+      }
+      throw new Error(`Unexpected Figma API URL ${url}`);
+    });
+    const res = createResponse();
+
+    await handleFigmaIntegration(
+      createRequest("POST", {
+        mode: "update",
+        figma_url: "https://www.figma.com/design/AbCd1234EFgh/RMB-Content-Planning",
+        campaign_plan: { campaignId: "camp_test", name: "Cold Cut Global Campaign" },
+        content_requirements: [
+          { id: "paid-headline", title: "Paid search headline", channel: "Paid Media", assetType: "Search headline" },
+          { id: "email-hero", title: "Email hero", channel: "Email", assetType: "Hero module" },
+        ],
+      }),
+      res,
+    );
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.fileName).toBe("RMB Content Planning Board");
+    expect(body.commentId).toBe("comment_456");
+    expect(body.manifest.frameCount).toBe(2);
+    expect(body.manifest.placeholderCount).toBe(2);
+
+    globalThis.fetch = originalFetch;
+    restoreEnvKey("FIGMA_TOKEN", originalToken);
+  });
+
+  it("reports remote Figma MCP as authentication-required when no OAuth connection exists", async () => {
+    const originalMcpUrl = process.env.FIGMA_MCP_URL;
+    const originalMcpToken = process.env.FIGMA_MCP_ACCESS_TOKEN;
+    process.env.FIGMA_MCP_URL = "https://mcp.figma.com/mcp";
+    delete process.env.FIGMA_MCP_ACCESS_TOKEN;
+    const res = createResponse();
+
+    await handleFigmaMcpStatus(createRequest("GET"), res);
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({
+      provider: "figma",
+      mcp: {
+        configured: true,
+        authenticated: false,
+        status: "auth-required",
+      },
+      connection: {
+        authenticated: false,
+      },
+    });
+
+    restoreEnvKey("FIGMA_MCP_URL", originalMcpUrl);
+    restoreEnvKey("FIGMA_MCP_ACCESS_TOKEN", originalMcpToken);
+  });
+
+  it("returns auth-required when creating a Figma board without MCP OAuth", async () => {
+    const originalMcpUrl = process.env.FIGMA_MCP_URL;
+    const originalMcpToken = process.env.FIGMA_MCP_ACCESS_TOKEN;
+    process.env.FIGMA_MCP_URL = "https://mcp.figma.com/mcp";
+    delete process.env.FIGMA_MCP_ACCESS_TOKEN;
+    const res = createResponse();
+
+    await handleFigmaMcpCreateBoard(
+      createRequest("POST", {
+        figma_url: "https://www.figma.com/design/AbCd1234EFgh/RMB-Content-Planning",
+        campaign_plan: { campaignId: "camp_test", name: "Cold Cut Global Campaign" },
+        content_requirements: [
+          { id: "paid-headline", title: "Paid search headline", channel: "Paid Media", assetType: "Search headline" },
+        ],
+      }),
+      res,
+    );
+
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(401);
+    expect(body).toMatchObject({
+      ok: false,
+      authRequired: true,
+      capability: "mcp-auth-required",
+      manifest: {
+        placeholderCount: 1,
+      },
+    });
+
+    restoreEnvKey("FIGMA_MCP_URL", originalMcpUrl);
+    restoreEnvKey("FIGMA_MCP_ACCESS_TOKEN", originalMcpToken);
+  });
+
+  it("redirects to Figma OAuth and persists the PKCE state", async () => {
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.PANDA_RUNTIME_MODE = "supabase";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    const fakeSupabase = createFigmaOAuthSupabase();
+    createClientMock.mockReturnValue(fakeSupabase);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      if (String(url).includes("oauth-protected-resource")) {
+        return { ok: true, json: async () => ({ resource: "https://mcp.figma.com/mcp", authorization_servers: ["https://api.figma.com"], scopes_supported: ["mcp:connect"] }) };
+      }
+      if (String(url).includes("oauth-authorization-server")) {
+        return { ok: true, json: async () => ({ authorization_endpoint: "https://www.figma.com/oauth/mcp", token_endpoint: "https://api.figma.com/v1/oauth/token", registration_endpoint: "https://api.figma.com/v1/oauth/mcp/register" }) };
+      }
+      if (String(url).includes("oauth/mcp/register")) {
+        return { ok: true, json: async () => ({ client_id: "client_123", client_secret: "secret_123" }) };
+      }
+      throw new Error(`Unexpected OAuth URL ${url} ${JSON.stringify(init)}`);
+    });
+    const res = createResponse();
+
+    await handleFigmaOAuthConnect(createRequest("GET"), res);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain("https://www.figma.com/oauth/mcp?");
+    expect(res.headers.location).toContain("client_id=client_123");
+    expect(fakeSupabase.tables.integration_oauth_states).toHaveLength(1);
+    expect(fakeSupabase.tables.integration_oauth_states[0]).toMatchObject({ provider: "figma", client_id: "client_123" });
+
+    globalThis.fetch = originalFetch;
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+    createClientMock.mockReset();
+  });
+
+  it("exchanges Figma OAuth callback code and stores the MCP connection", async () => {
+    const originalRuntimeMode = process.env.PANDA_RUNTIME_MODE;
+    const originalSupabaseUrl = process.env.SUPABASE_URL;
+    const originalSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.PANDA_RUNTIME_MODE = "supabase";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    const fakeSupabase = createFigmaOAuthSupabase({
+      integration_oauth_states: [{
+        provider: "figma",
+        state: "state_123",
+        code_verifier: "verifier_123",
+        redirect_uri: "http://127.0.0.1:8787/api/integrations/figma/oauth/callback",
+        client_id: "client_123",
+        client_secret: "secret_123",
+        metadata: {},
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      }],
+    });
+    createClientMock.mockReturnValue(fakeSupabase);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).includes("oauth/token")) {
+        return { ok: true, json: async () => ({ access_token: "access_123", refresh_token: "refresh_123", expires_in: 3600, token_type: "Bearer" }) };
+      }
+      throw new Error(`Unexpected token URL ${url}`);
+    });
+    const res = createResponse();
+    const req = createRequest("GET");
+    req.url = "/api/integrations/figma/oauth/callback?code=code_123&state=state_123";
+
+    await handleFigmaOAuthCallback(req, res);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain("figma_mcp=connected");
+    expect(fakeSupabase.tables.integration_connections).toHaveLength(1);
+    expect(fakeSupabase.tables.integration_connections[0]).toMatchObject({
+      provider: "figma",
+      status: "connected",
+      access_token: "access_123",
+    });
+
+    globalThis.fetch = originalFetch;
+    restoreEnvKey("PANDA_RUNTIME_MODE", originalRuntimeMode);
+    restoreEnvKey("SUPABASE_URL", originalSupabaseUrl);
+    restoreEnvKey("SUPABASE_SERVICE_ROLE_KEY", originalSupabaseKey);
+    createClientMock.mockReset();
+  });
 });
 
 describe("orchestrator response normalization", () => {
@@ -1741,6 +1935,50 @@ function restoreEnvKey(name, value) {
   }
 
   process.env[name] = value;
+}
+
+function createFigmaOAuthSupabase(seed = {}) {
+  const tables = {
+    integration_oauth_states: [...(seed.integration_oauth_states ?? [])],
+    integration_connections: [...(seed.integration_connections ?? [])],
+  };
+  return {
+    tables,
+    from(tableName) {
+      return {
+        insert(row) {
+          tables[tableName].push(row);
+          return Promise.resolve({ error: null });
+        },
+        upsert(row) {
+          const index = tables[tableName].findIndex((item) => item.provider === row.provider);
+          if (index >= 0) tables[tableName][index] = { ...tables[tableName][index], ...row };
+          else tables[tableName].push(row);
+          return Promise.resolve({ error: null });
+        },
+        select() {
+          const query = {
+            filters: [],
+            eq(column, value) {
+              this.filters.push([column, value]);
+              return this;
+            },
+            order() {
+              return this;
+            },
+            limit() {
+              return this;
+            },
+            maybeSingle() {
+              const data = tables[tableName].find((row) => this.filters.every(([column, value]) => row[column] === value));
+              return Promise.resolve({ data, error: null });
+            },
+          };
+          return query;
+        },
+      };
+    },
+  };
 }
 
 function createFakeSupabaseClient(scripts = {}) {

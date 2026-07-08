@@ -942,14 +942,14 @@ export const phases: Array<{ id: PhaseId; label: string; agents: string; gate: G
     label: "Plan",
     agents: "A0 A1 A2 A3 A4 A5",
     gate: "H1",
-    description: "Turn the brief into the campaign plan: objective, audience, channels, KPIs, budget, risks, and downstream handoff."
+    description: "Create the RMB campaign-planning deliverables: MarCom packet, media plan, HOL journey map, email brief, organic/HN strategy, and downstream handoff."
   },
   {
     id: "content",
     label: "Content",
     agents: "CP1 CP2 CP3 CP4 C1 C2 C4",
     gate: "H2",
-    description: "Turn the approved H1 plan into channel-by-asset requirements before Content builds each piece."
+    description: "Turn the campaign plan into creative direction, channel-by-asset requirements, storyboards, Figma mapping, and content handoff."
   },
   {
     id: "rollout",
@@ -1058,7 +1058,7 @@ export const coverageItems: CoverageItem[] = [
     workstream: "Content Planning",
     name: "Figma Mapping Agent",
     requestedOutput: "Figma board with placeholders / structured output",
-    backlogCoverage: "Covered by E2-S4/CP4",
+    backlogCoverage: "Covered by the Figma mapping story",
     pandaCoverage: "missing",
     gap: "Needs Figma board manifest or mock board representation",
     owner: "Designer / Creative Manager / Content Operations",
@@ -1800,9 +1800,9 @@ export function draftSpecialistAgentResponse(view: AppView, question: string, co
     const deliverablePatch = contentPlanningDeliverablePatchFromInstruction(context.campaign_plan, question);
     if (deliverablePatch) {
       return {
-        answer: `Content Planning Panda created CP1 creative concept for ${context.campaign_name}. I updated the CP1 artifact with the big idea, key message, visual direction, channel adaptation, and approval ask. No H2 approval was taken yet.`,
+        answer: `Content Planning Panda created the creative concept for ${context.campaign_name}. I updated the concept artifact with the big idea, key message, visual direction, channel adaptation, and approval ask. No H2 approval was taken yet.`,
         updates: [deliverablePatch],
-        suggested_actions: ["Review CP1 artifact", "Ask Panda to revise the creative concept", "Approve CP1 object when ready"],
+        suggested_actions: ["Review the creative concept", "Ask Panda to revise the concept", "Approve the object when ready"],
         route: "content-planning"
       };
     }
@@ -1810,10 +1810,10 @@ export function draftSpecialistAgentResponse(view: AppView, question: string, co
     const changed = updatedRequirements !== context.content_requirements;
     return {
       answer: changed
-        ? "Content Planning Panda updated the CP bridge requirements and kept the change scoped to Content Planning. Downstream Content objects should refresh from the revised matrix."
+        ? "Content Planning Panda updated the content-planning requirements and kept the change scoped to Content Planning. Downstream Content objects should refresh from the revised matrix."
         : draftWorkspaceAgentAnswer(view, question, context),
       updates: changed ? [{ target: "content_requirements", action: "replace", requirements: updatedRequirements }] : [],
-      suggested_actions: ["Review CP1-CP4 package", "Open Requirements Matrix", "Prepare H2 after object approvals"],
+      suggested_actions: ["Review the content-planning package", "Open Requirements Matrix", "Prepare H2 after object approvals"],
       route: "content-planning"
     };
   }
@@ -2181,7 +2181,7 @@ export function campaignPlanningDeliverables(plan: CampaignPlan): RmbDeliverable
       requestedBy: "Campaign Planning Owner: Erin Shier",
       outputFormats: ["PPTX"],
       sections: ["Campaign theme", "Objective and KPIs", "Hero product", "Offer", "Audience", "Timeline", "Channel overview"],
-      summary: `${campaignThemeForPlan(plan)} H1 MarCom packet with ${plan.audience.join(" / ")} audience, ${plan.budget} budget, and ${plan.channels.length} channels.`,
+      summary: `${campaignThemeForPlan(plan)} MarCom planning packet with ${plan.audience.join(" / ")} audience, ${plan.budget} budget, and ${plan.channels.length} channels.`,
       previewItems: [
         campaignThemeForPlan(plan),
         `Audience: ${plan.audience.join(" / ")}`,
@@ -2195,16 +2195,16 @@ export function campaignPlanningDeliverables(plan: CampaignPlan): RmbDeliverable
         { label: "Campaign theme", value: campaignThemeForPlan(plan) },
         { label: "Objective and KPIs", value: `Objective: create qualified demand and measurable downstream action. KPIs: ${plan.kpis.join(", ")}.` },
         { label: "Hero product", value: plan.heroProduct },
-        { label: "Offer", value: "Offer or promotion mechanic requires Campaign Owner confirmation before H1 approval." },
+        { label: "Offer", value: "Offer or promotion mechanic requires Campaign Owner confirmation before leadership review." },
         { label: "Audience", value: plan.audience.join(" / ") },
         { label: "Timeline", value: plan.timeline },
         { label: "Channel overview", value: plan.channels.map((channel) => `${channel.name} -> ${channel.rolloutTarget}`).join("; ") }
       ],
       discussionNotes: [
-        `Panda assembled the H1 MarCom packet from the active ${plan.name} campaign context.`,
-        "This artifact is the source of handoff for Content Planning and should capture leadership revisions before H1 approval."
+        `Panda assembled the MarCom planning packet from the active ${plan.name} campaign context.`,
+        "This artifact is the source of handoff for Content Planning and should capture leadership revisions before final planning review."
       ],
-      workspaceAction: "Review H1 MarCom packet, ask Panda for revisions, then prepare the H1 gate decision"
+      workspaceAction: "Review the MarCom planning packet, ask Panda for revisions, then prepare final planning signoff"
     },
     {
       id: "paid-media-plan",
@@ -2217,7 +2217,7 @@ export function campaignPlanningDeliverables(plan: CampaignPlan): RmbDeliverable
       sections: ["Platform mix", "Campaign/ad structure", "Audiences", "Keywords", "Budget split", "Projected KPIs", "Asset strategy", "Testing roadmap"],
       summary: paidMedia
         ? `Paid media plan for ${plan.heroProduct}: ${paidMedia.requiredAssets.length} asset types, budget split, KPI benchmarks, audience logic, and testing roadmap.`
-        : "Paid media is not selected in the active H1 plan.",
+        : "Paid media is not selected in the active campaign plan.",
       previewItems: [
         paidMedia ? `${paidMedia.requiredAssets.length} paid-media asset types scoped` : "Paid-media channel not selected",
         `${plan.budget} to split by platform, campaign, and ad type`,
@@ -2247,7 +2247,7 @@ export function campaignPlanningDeliverables(plan: CampaignPlan): RmbDeliverable
       sections: ["Entry paths", "Touchpoints", "Landing pages", "Banners", "Required UX assets", "Direct-entry journey"],
       summary: hol
         ? `HOL journey map for ${plan.heroProduct}: channel entry paths, Contentful landing page needs, banner touchpoints, and direct-entry journey.`
-        : "HOL landing page is not selected in the active H1 plan.",
+        : "HOL landing page is not selected in the active campaign plan.",
       previewItems: [
         hol ? `${hol.requiredAssets.join(", ")} planned for Contentful` : "HOL landing page not selected",
         "Map campaign-channel entry and direct website entry",
@@ -2275,7 +2275,7 @@ export function campaignPlanningDeliverables(plan: CampaignPlan): RmbDeliverable
       sections: ["Segments", "Email count", "Sequence", "Journey role", "Messaging strategy", "Testing plan"],
       summary: email
         ? `Email TA brief for ${plan.heroProduct}: segments, journey role, email modules, message sequence, and SFMC assumptions.`
-        : "Email is not selected in the active H1 plan.",
+        : "Email is not selected in the active campaign plan.",
       previewItems: [
         email ? `${email.requiredAssets.length} email modules scoped` : "Email channel not selected",
         "Define Awareness / Consideration / Conversion role per email",
@@ -2287,7 +2287,7 @@ export function campaignPlanningDeliverables(plan: CampaignPlan): RmbDeliverable
       status: email ? "draft" : "blocked",
       artifactDetails: [
         { label: "Segments", value: plan.audience.join(" / ") },
-        { label: "Email count", value: email ? `${email.requiredAssets.length} modules or emails scoped from H1.` : "No email assets scoped." },
+        { label: "Email count", value: email ? `${email.requiredAssets.length} modules or emails scoped from the campaign plan.` : "No email assets scoped." },
         { label: "Sequence", value: "Awareness proof, consideration detail, and conversion CTA sequence to be confirmed with Email TA." },
         { label: "Testing plan", value: "Subject line, CTA, proof point, and audience segment tests are proposed before rollout." }
       ]
@@ -2303,7 +2303,7 @@ export function campaignPlanningDeliverables(plan: CampaignPlan): RmbDeliverable
       sections: ["Campaign story", "Owned social", "Hilti Network", "Asset list", "Formats", "Dimensions"],
       summary: organic
         ? `Organic/HN strategy for ${plan.heroProduct}: campaign story, owned social role, HN role, formats, and dimensions.`
-        : "Organic/HN is not selected in the active H1 plan.",
+        : "Organic/HN is not selected in the active campaign plan.",
       previewItems: [
         organic ? `${organic.requiredAssets.join(", ")} scoped for Sprinklr/HN` : "Organic/HN not selected",
         "Separate Hilti owned-channel and Hilti Network narrative needs",
@@ -2364,7 +2364,7 @@ export function campaignPlanningDeliverablePatchFromInstruction(
           { label: "Campaign theme", value: campaignThemeForPlan(plan) },
           { label: "Objective and KPIs", value: `${objective} KPIs: ${kpis}` },
           { label: "Audience", value: audience },
-          { label: "Offer", value: "Confirm offer/promotion mechanism with Campaign Owner before final H1 approval." },
+          { label: "Offer", value: "Confirm offer/promotion mechanism with Campaign Owner before final planning review." },
           { label: "Budget and timeline", value: `${budget} ${timeline}` },
           { label: "Channel overview", value: channel }
         ]
@@ -2375,13 +2375,13 @@ export function campaignPlanningDeliverablePatchFromInstruction(
           return detail;
         });
 
-  const artifactName = id === "marcom-plan" ? "H1 MarCom Planning Packet" : deliverable.title;
-  const previewName = id === "marcom-plan" ? "H1 MarCom plan" : artifactName;
+  const artifactName = id === "marcom-plan" ? "MarCom Planning Packet" : deliverable.title;
+  const previewName = id === "marcom-plan" ? "MarCom plan" : artifactName;
   return {
     target: "rmb_deliverable",
     id,
       patch: {
-      summary: `${artifactName} created from active H1 plan, latest planning objects, and Panda/user discussion for ${hero}. Theme: ${campaignThemeForPlan(plan)}`,
+      summary: `${artifactName} created from the active campaign plan, latest planning objects, and Panda/user discussion for ${hero}. Theme: ${campaignThemeForPlan(plan)}`,
       status: "in-review",
       previewItems: [
         campaignThemeForPlan(plan),
@@ -2393,7 +2393,7 @@ export function campaignPlanningDeliverablePatchFromInstruction(
         `Panda created ${artifactName} from the active ${plan.name} plan and latest Campaign Planning conversation.`,
         "This artifact can now be revised by asking Campaign Planning Panda for specific objective, audience, KPI, channel, budget, or timeline changes."
       ],
-      workspaceAction: `Review ${artifactName}, revise with Campaign Planning Panda, then include it in the H1 gate packet`
+      workspaceAction: `Review ${artifactName}, revise with Campaign Planning Panda, then include it in the final planning packet`
     }
   };
 }
@@ -2505,7 +2505,7 @@ function planningUpdatesFromInstruction(objects: Array<Pick<PlanningWorkObject, 
       },
       "campaign-timeline": {
         status: "in-review",
-        copy: "Draft H1 timeline: complete H1 planning review, hand CP1-CP4 requirements into Content Planning, complete H2 content/QA approvals, prepare rollout manifests and connector QA for H3, then move to H4 insight review after live performance evidence is available.",
+        copy: "Draft H1 timeline: complete the planning review, hand content planning requirements into Content Planning, complete H2 content/QA approvals, prepare rollout manifests and connector QA for H3, then move to H4 insight review after live performance evidence is available.",
         evidence: ["Home Panda continuation", "Campaign timeline draft"]
       },
       "assumptions-risks": {
@@ -2655,7 +2655,7 @@ export function contentPlanningDeliverablePatchFromInstruction(
       previewItems: [
         `${bigIdea} for ${primaryAudience}`,
         `Campaign markets: ${markets}`,
-        "Ready for CP1 object review before H2"
+        "Ready for creative review"
       ],
       artifactDetails: [
         {
@@ -2676,14 +2676,14 @@ export function contentPlanningDeliverablePatchFromInstruction(
         },
         {
           label: "Approval ask",
-          value: "Approve CP1 creative direction or request revision before CP2 requirements and CP4 Figma mapping are finalized."
+          value: "Approve the creative direction or request revision before requirements and Figma mapping are finalized."
         }
       ],
       discussionNotes: [
-        `Panda created CP1 from the active ${plan.name} H1 plan, audience, channels, and H2 content requirements.`,
+        `Panda created the creative concept from the active ${plan.name} campaign plan, audience, channels, and content requirements.`,
         "This is a working creative concept artifact, not only a preview/download card."
       ],
-      workspaceAction: "Review CP1 creative concept, revise with Panda, then approve the object for H2"
+      workspaceAction: "Review the creative concept, revise with Panda, then mark the object ready"
     }
   };
 }
@@ -2726,14 +2726,14 @@ export function buildContentPlanningBridge(plan: CampaignPlan, requirements: Con
         script: `${hero}: prove the value, show the action, close with one CTA.`
       })),
       shotlist: ["Hero product close-up", "In-situ application", "Outcome proof frame", "CTA/end card"],
-      productionPlan: ["Confirm claims with Compliance", "Map visual idea to Figma placeholders", "Prepare static mockups for H2 review"]
+      productionPlan: ["Confirm claims with Compliance", "Map visual idea to Figma placeholders", "Prepare static mockups for content review"]
     },
     figmaBoard: {
       storyId: "CP4",
       title: "Figma Board Mapping",
       status: "draft",
       mappingStatus: "ready-to-create",
-      figmaUrl: "https://figma.com/file/panda-cp4-placeholder",
+      figmaUrl: "",
       frames: channels.map((channel) => ({
         id: `figma-${slug(channel)}`,
         name: `${channel} master placeholders`,
@@ -2741,7 +2741,7 @@ export function buildContentPlanningBridge(plan: CampaignPlan, requirements: Con
         placeholderCount: requirements.filter((item) => item.channel === channel).length,
         ratio: channel === "Paid Media" ? "1:1 / 4:5 / 16:9" : channel === "Email" ? "Email module" : "Responsive module"
       })),
-      actions: ["Create Figma Mapping", "Open Figma", "Sync placeholders to Content"]
+      actions: ["Create mapping board", "Open Figma", "Sync placeholders to Content"]
     }
   };
 }
@@ -2753,7 +2753,7 @@ export function contentPlanningDeliverables(plan: CampaignPlan, requirements: Co
   return withRmbDeliverableDefaults([
     {
       id: "cp1-creative-concept",
-      title: "CP1 Creative Concept",
+      title: "Creative Concept",
       workspace: "Content Planning",
       gate: "H2",
       owner: "Content / Creative",
@@ -2765,7 +2765,7 @@ export function contentPlanningDeliverables(plan: CampaignPlan, requirements: Co
         "Head / heart / hands narrative",
         "Proof-led visual directions ready for review"
       ],
-      sourceInputs: ["H1 campaign plan", "Paid media strategy", "Organic/HN strategy", "Brand playbook"],
+      sourceInputs: ["Campaign plan", "Paid media strategy", "Organic/HN strategy", "Brand playbook"],
       handoffTarget: "Content",
       approvalLevel: "object-and-final",
       status: "in-review",
@@ -2777,14 +2777,14 @@ export function contentPlanningDeliverables(plan: CampaignPlan, requirements: Co
         { label: "Visual direction", value: bridge.creativeConcept.visualDirections.join("; ") }
       ],
       discussionNotes: [
-        "Panda shaped this CP1 package from the active H1 plan, audience, channels, and brand evidence.",
-        "Approval should happen at CP1 object level before the final H2 gate."
+        "Panda shaped this creative concept package from the active campaign plan, audience, channels, and brand evidence.",
+        "Review should happen at object level before the final content handoff."
       ],
-      workspaceAction: "Open CP1 detail and revise creative concept"
+      workspaceAction: "Open the creative concept detail and revise the concept"
     },
     {
       id: "cp2-requirements-matrix",
-      title: "CP2 Cross-Channel Requirements Matrix",
+      title: "Cross-Channel Requirements Matrix",
       workspace: "Content Planning",
       gate: "H2",
       owner: "Content / Creative",
@@ -2796,14 +2796,14 @@ export function contentPlanningDeliverables(plan: CampaignPlan, requirements: Co
         `${channels.length} channels: ${channels.join(", ")}`,
         `${locales.length || 1} locale scope`
       ],
-      sourceInputs: ["H1 plan", "Content scope", "Paid media/HOL/email/organic strategies"],
+      sourceInputs: ["Campaign plan", "Content scope", "Paid media/HOL/email/organic strategies"],
       handoffTarget: "Content",
       approvalLevel: "object-and-final",
       status: "in-review"
     },
     {
       id: "cp3-storyboard",
-      title: "CP3 Storyboard Package",
+      title: "Storyboard Package",
       workspace: "Content Planning",
       gate: "H2",
       owner: "Content / Creative",
@@ -2822,7 +2822,7 @@ export function contentPlanningDeliverables(plan: CampaignPlan, requirements: Co
     },
     {
       id: "cp4-figma-mapping",
-      title: "CP4 Figma Board Mapping",
+      title: "Figma Board Mapping",
       workspace: "Content Planning",
       gate: "H2",
       owner: "Content / Creative",
@@ -2832,7 +2832,7 @@ export function contentPlanningDeliverables(plan: CampaignPlan, requirements: Co
       previewItems: [
         `${channels.length} Figma frame groups`,
         `${requirements.length} placeholders mapped to production objects`,
-        "Create Figma Mapping link/button remains prototype-safe"
+        "Sync Panda requirements to an existing Figma file or MCP-created board"
       ],
       sourceInputs: ["Content requirement matrix", "Figma template/layouts", "Channel asset scope"],
       handoffTarget: "Content",
@@ -2857,7 +2857,7 @@ export function buildPlanPreviewSlides(view: Extract<AppView, "campaign-planning
   if (view === "content-planning") {
     return [
       {
-        kicker: "H2 leadership preview",
+        kicker: "Content leadership preview",
         title: `${plan.name} content plan`,
         bullets: [`${requirements.length} requirements`, `${new Set(requirements.map((item) => item.channel)).size} channels`, `${plan.locales.length} locales`]
       },
@@ -2874,7 +2874,7 @@ export function buildPlanPreviewSlides(view: Extract<AppView, "campaign-planning
       {
         kicker: "Leadership decision",
         title: "Decision Ask",
-        bullets: ["Approve H2 direction", "Confirm audience and locale priorities", "Confirm content risks before rollout build"]
+        bullets: ["Approve content direction", "Confirm audience and locale priorities", "Confirm content risks before rollout build"]
       }
     ];
   }

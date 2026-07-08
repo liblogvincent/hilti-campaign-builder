@@ -3555,6 +3555,57 @@ footer {
   color: var(--hilti);
 }
 
+.figmaArtifactBrief {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e5d8c6;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.figmaArtifactBrief small {
+  color: var(--hilti);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.figmaArtifactBrief h4 {
+  margin: 4px 0 6px;
+  font-family: PandaDisplay, sans-serif;
+  font-size: 24px;
+}
+
+.figmaArtifactBrief p {
+  max-width: 860px;
+  margin: 0;
+  color: #555;
+  line-height: 1.45;
+}
+
+.figmaArtifactBrief pre {
+  max-height: 280px;
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--hilti);
+  border-radius: 10px;
+  background: #fffaf0;
+  color: #222;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.figmaArtifactActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .slidePreviewGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4140,6 +4191,37 @@ footer {
   align-items: center;
 }
 
+.figmaTargetField {
+  display: grid;
+  flex: 1 1 320px;
+  min-width: 240px;
+  gap: 6px;
+}
+
+.figmaTargetField span {
+  color: #77645f;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.figmaTargetField input {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid #e0d7cc;
+  border-radius: 10px;
+  background: #fff;
+  color: #202326;
+  font: inherit;
+}
+
+.figmaTargetField input:focus {
+  border-color: var(--hilti-red);
+  box-shadow: 0 0 0 3px rgba(210, 5, 30, 0.12);
+  outline: none;
+}
+
 .figmaActionBar span {
   padding: 8px 10px;
   border: 1px solid #e7e1d7;
@@ -4148,6 +4230,37 @@ footer {
   color: #6b514b;
   font-size: 12px;
   font-weight: 900;
+}
+
+.figmaSyncStatus {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid #ead8d1;
+  border-left: 4px solid var(--hilti-red);
+  border-radius: 12px;
+  background: #fff9f7;
+}
+
+.figmaSyncStatus.ok {
+  border-color: #bcd8c9;
+  border-left-color: #176b49;
+  background: #f5fbf7;
+}
+
+.figmaSyncStatus strong {
+  font-weight: 900;
+}
+
+.figmaSyncStatus p,
+.figmaSyncStatus small {
+  margin: 0;
+  color: #50585b;
+  line-height: 1.45;
+}
+
+.figmaSyncStatus small {
+  font-size: 12px;
 }
 
 .figmaFramePreview {

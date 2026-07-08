@@ -247,7 +247,7 @@ function planningPacket(payload) {
 function contentPacket() {
   return phasePacket(
     "H2",
-    "Content Planning bridge package created for H2: CP1 Creative Concept, CP2 Cross-Channel Requirements, CP3 Storyboarding, and CP4 Figma Mapping evidence are ready for object-level approval.",
+    "Content Planning bridge package created for H2: creative concept, cross-channel requirements, storyboarding, and Figma mapping evidence are ready for object-level approval.",
     [
       { agent: "cp1", status: "done", message: "Selected a torque-first creative concept with contractor proof points." },
       { agent: "cp2", status: "done", message: "Mapped Meta, LinkedIn, Google, email, HOL, social, and HN asset requirements." },

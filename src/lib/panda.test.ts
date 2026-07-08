@@ -683,10 +683,10 @@ describe("panda run model", () => {
         expect.objectContaining({ label: "Visual direction" })
       ])
     );
-    expect(patch?.patch.discussionNotes?.join(" ")).toContain("Panda created CP1");
+    expect(patch?.patch.discussionNotes?.join(" ")).toContain("Panda created the creative concept");
   });
 
-  it("drafts a specialist update when Content Planning Panda creates CP1", () => {
+  it("drafts a specialist update when Content Planning Panda creates the creative concept", () => {
     const run = createDefaultRun();
     const plan = campaignPlanForRun(run);
     const packet = buildPandaContextPacket({
@@ -703,7 +703,7 @@ describe("panda run model", () => {
 
     const response = draftSpecialistAgentResponse("content-planning", "please create the cp1 creative concept", packet);
 
-    expect(response.answer).toContain("created CP1 creative concept");
+    expect(response.answer).toContain("created the creative concept");
     expect(response.updates).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ target: "rmb_deliverable", id: "cp1-creative-concept" })
@@ -728,7 +728,7 @@ describe("panda run model", () => {
       ])
     );
     expect(patch?.patch.artifactDetails?.find((item) => item.label === "Campaign theme")?.value).toContain(campaignThemeHeadline(plan.heroProduct));
-    expect(patch?.patch.discussionNotes?.join(" ")).toContain("Panda created H1 MarCom");
+    expect(patch?.patch.discussionNotes?.join(" ")).toContain("Panda created MarCom Planning Packet");
   });
 
   it("builds a scoped revision prompt for a specific artifact", () => {
@@ -916,6 +916,19 @@ describe("panda run model", () => {
       expect.arrayContaining(["Platform mix", "Budget split", "Projected KPIs", "Testing roadmap"])
     );
     expect(deliverables.every((item) => item.gate === "H1" && item.previewItems.length > 0)).toBe(true);
+    const visibleCopy = deliverables
+      .flatMap((item) => [
+        item.title,
+        item.summary,
+        item.workspaceAction,
+        ...item.previewItems,
+        ...item.sourceInputs,
+        ...item.discussionNotes,
+        ...item.artifactDetails.map((detail) => `${detail.label}: ${detail.value}`),
+      ])
+      .join(" ");
+    expect(visibleCopy).not.toMatch(/\bH1\b/);
+    expect(visibleCopy).not.toMatch(/\bgate\b/i);
   });
 
   it("renders a campaign theme that sounds like a real theme line", () => {

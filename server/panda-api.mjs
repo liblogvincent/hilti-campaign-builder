@@ -6,6 +6,10 @@ import { executeRuntimeAction } from "./object-runtime.mjs";
 import { persistAgentTurn } from "./agent-runtime.mjs";
 import { buildFallback, buildIntegrationPackage, buildOrchestratorAnswer } from "./panda-packets.mjs";
 import { createSupabaseServerClient, runtimeMode } from "./supabase-client.mjs";
+import { buildFigmaMappingManifest, parseFigmaFileKey, resolveFigmaConfig, syncFigmaBoard } from "./figma-integration.mjs";
+import { loadIntegrationConnection, loadIntegrationOAuthState, saveIntegrationConnection, saveIntegrationOAuthState, summarizeIntegrationConnection } from "./integration-connections.mjs";
+import { buildFigmaAuthorizationUrl, createOAuthState, createPkcePair, discoverFigmaMcpOAuth, exchangeFigmaOAuthCode, registerFigmaMcpClient } from "./figma-oauth.mjs";
+import { callMcpTool, resolveMcpClientConfig } from "./mcp-client.mjs";
 
 const systemPrompt = `You are Panda, a DeepSeek-backed campaign orchestration agent for Hilti Agentic E2E.
 Return only compact JSON. Ground your output in this product truth:
@@ -71,6 +75,11 @@ export async function handlePandaApiRequest(req, res) {
   if (pathname === "/api/research-url") return handleResearchUrl(req, res);
   if (pathname === "/api/integrations/status") return handleIntegrationStatus(req, res);
   if (pathname === "/api/integrations/package") return handleIntegrationPackage(req, res);
+  if (pathname === "/api/integrations/figma") return handleFigmaIntegration(req, res);
+  if (pathname === "/api/integrations/figma/mcp-status") return handleFigmaMcpStatus(req, res);
+  if (pathname === "/api/integrations/figma/create-board") return handleFigmaMcpCreateBoard(req, res);
+  if (pathname === "/api/integrations/figma/connect") return handleFigmaOAuthConnect(req, res);
+  if (pathname === "/api/integrations/figma/oauth/callback") return handleFigmaOAuthCallback(req, res);
 
   return sendJson(res, 404, { error: "Not found" });
 }
@@ -391,6 +400,23 @@ export async function handleIntegrationPackage(req, res) {
   return sendJson(res, 200, buildIntegrationPackage(payload));
 }
 
+export async function handleFigmaIntegration(req, res) {
+  setCors(res);
+  if (req.method === "OPTIONS") return sendJson(res, 204, null);
+  if (req.method !== "POST") return sendJson(res, 405, { error: "Method not allowed" });
+
+  try {
+    const payload = await readJson(req);
+    const result = await syncFigmaBoard(payload);
+    return sendJson(res, result.ok ? 200 : 202, result);
+  } catch (error) {
+    return sendJson(res, 502, {
+      ok: false,
+      error: error instanceof Error ? error.message : "Figma integration failed",
+    });
+  }
+}
+
 export function loadEnv(path) {
   if (!existsSync(path)) return;
   const lines = readFileSync(path, "utf8").split(/\r?\n/);
@@ -510,15 +536,207 @@ export function normalizeOrchestratorResponse(data, payload, mode) {
 }
 
 function integrationStatus() {
+  const figma = resolveFigmaConfig();
+  const mcp = resolveMcpClientConfig();
   return {
     deepseek: process.env.DEEPSEEK_API_KEY ? "live" : "missing-key",
-    figma: process.env.FIGMA_TOKEN ? "configured" : "stub",
+    figma: figma.restConfigured ? "api-configured" : "missing-token",
+    figma_mcp: mcp.configured && mcp.authenticated ? "configured" : mcp.configured ? "auth-required" : "not-configured",
     contentful: process.env.CONTENTFUL_CMA_TOKEN ? "configured" : "stub",
     meta_ads: "file-export",
     google_ads: "file-export",
     linkedin_ads: "file-export",
     h3_publish: "human-gated",
   };
+}
+
+export async function handleFigmaMcpStatus(_req, res) {
+  setCors(res);
+  const supabase = createSupabaseServerClient();
+  const connection = await loadIntegrationConnection({ provider: "figma", supabase });
+  const config = resolveMcpClientConfig({ connection });
+  return sendJson(res, 200, {
+    provider: "figma",
+    mcp: {
+      url: config.url,
+      tool: config.tool,
+      configured: config.configured,
+      authenticated: config.authenticated,
+      remote: config.remote,
+      status: config.configured && config.authenticated ? "ready" : config.configured ? "auth-required" : "not-configured",
+    },
+    connection: summarizeIntegrationConnection(connection),
+  });
+}
+
+export async function handleFigmaMcpCreateBoard(req, res) {
+  setCors(res);
+  const payload = await readJson(req);
+  const supabase = createSupabaseServerClient();
+  const connection = await loadIntegrationConnection({ provider: "figma", supabase });
+  const manifest = buildFigmaMappingManifest(payload);
+  const fileKey = parseFigmaFileKey(payload.figma_file || payload.figma_url || payload.existing_board);
+  const result = await callMcpTool({
+    connection,
+    tool: process.env.FIGMA_MCP_TOOL || "generate_figma_design",
+    argumentsPayload: {
+      mode: "create",
+      fileKey,
+      manifest,
+      prompt: buildFigmaMcpDesignPrompt(manifest),
+    },
+  });
+
+  if (!result.ok) {
+    return sendJson(res, result.authRequired ? 401 : 502, {
+      ok: false,
+      capability: result.authRequired ? "mcp-auth-required" : "mcp-create-failed",
+      authRequired: Boolean(result.authRequired),
+      error: result.error,
+      manifest,
+      mcp: result,
+      connection: summarizeIntegrationConnection(connection),
+    });
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    capability: "mcp-board-created",
+    fileKey,
+    manifest,
+    mcp: result,
+    connection: summarizeIntegrationConnection(connection),
+  });
+}
+
+export async function handleFigmaOAuthConnect(req, res) {
+  setCors(res);
+  const supabase = createSupabaseServerClient();
+  if (!supabase) {
+    return sendJson(res, 503, {
+      ok: false,
+      error: "Supabase service role is required to store Figma MCP OAuth state.",
+    });
+  }
+
+  const metadata = await discoverFigmaMcpOAuth();
+  const redirectUri = buildFigmaRedirectUri(req);
+  const client = process.env.FIGMA_OAUTH_CLIENT_ID
+    ? { clientId: process.env.FIGMA_OAUTH_CLIENT_ID, clientSecret: process.env.FIGMA_OAUTH_CLIENT_SECRET || "" }
+    : await registerFigmaMcpClient({ registrationEndpoint: metadata.registrationEndpoint, redirectUri });
+  const pkce = createPkcePair();
+  const state = createOAuthState();
+  await saveIntegrationOAuthState({
+    provider: "figma",
+    state,
+    codeVerifier: pkce.verifier,
+    redirectUri,
+    clientId: client.clientId,
+    clientSecret: client.clientSecret,
+    metadata: {
+      resource: metadata.resource,
+      scope: metadata.scope,
+      tokenEndpoint: metadata.tokenEndpoint,
+      authorizationEndpoint: metadata.authorizationEndpoint,
+    },
+    supabase,
+  });
+
+  const location = buildFigmaAuthorizationUrl({
+    authorizationEndpoint: metadata.authorizationEndpoint,
+    clientId: client.clientId,
+    redirectUri,
+    state,
+    codeChallenge: pkce.challenge,
+    resource: metadata.resource,
+    scope: metadata.scope,
+  });
+  res.writeHead(302, { Location: location });
+  res.end();
+}
+
+export async function handleFigmaOAuthCallback(req, res) {
+  setCors(res);
+  const supabase = createSupabaseServerClient();
+  if (!supabase) {
+    return sendJson(res, 503, {
+      ok: false,
+      error: "Supabase service role is required to store Figma MCP OAuth tokens.",
+    });
+  }
+  const url = requestUrl(req);
+  const code = url.searchParams.get("code") || "";
+  const state = url.searchParams.get("state") || "";
+  const oauthError = url.searchParams.get("error") || "";
+  if (oauthError) return redirectAfterFigmaOAuth(res, "error", oauthError);
+  if (!code || !state) {
+    return sendJson(res, 400, { ok: false, error: "Figma OAuth callback is missing code or state." });
+  }
+
+  const pending = await loadIntegrationOAuthState({ provider: "figma", state, supabase });
+  if (!pending) return sendJson(res, 400, { ok: false, error: "Figma OAuth state is missing or expired." });
+  const token = await exchangeFigmaOAuthCode({
+    tokenEndpoint: pending.metadata?.tokenEndpoint || "https://api.figma.com/v1/oauth/token",
+    clientId: pending.clientId,
+    clientSecret: pending.clientSecret,
+    code,
+    codeVerifier: pending.codeVerifier,
+    redirectUri: pending.redirectUri,
+  });
+  await saveIntegrationConnection({
+    provider: "figma",
+    token,
+    metadata: {
+      source: "figma-remote-mcp-oauth",
+      resource: pending.metadata?.resource || "https://mcp.figma.com/mcp",
+      scope: token.scope || pending.metadata?.scope || "mcp:connect",
+    },
+    supabase,
+  });
+  return redirectAfterFigmaOAuth(res, "connected");
+}
+
+function buildFigmaMcpDesignPrompt(manifest) {
+  const frameLines = manifest.frames.map((frame) => {
+    const placeholders = frame.placeholders.map((item) => `${item.title} (${item.assetType}, ${item.locale})`).join("; ");
+    return `- ${frame.name}: ${frame.placeholderCount} placeholders. ${placeholders}`;
+  });
+  return [
+    `Create or update a Figma content planning board for ${manifest.campaignName}.`,
+    "Use editable native Figma frames, text layers, and placeholder cards.",
+    "Use Hilti red #d2051e as the primary accent and keep the layout clean for production handoff.",
+    "Create these frame groups:",
+    ...frameLines,
+    "Each placeholder card must include asset title, channel, asset type, locale, owner, rollout target, and Panda object ID.",
+  ].join("\n");
+}
+
+function buildFigmaRedirectUri(req) {
+  const configured = process.env.FIGMA_OAUTH_REDIRECT_URI;
+  if (configured) return configured;
+  return `${requestOrigin(req)}/api/integrations/figma/oauth/callback`;
+}
+
+function requestOrigin(req) {
+  const base = process.env.PANDA_PUBLIC_BASE_URL || process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`;
+  if (base) return base.replace(/\/$/, "");
+  const proto = req.headers?.["x-forwarded-proto"] || "http";
+  const host = req.headers?.["x-forwarded-host"] || req.headers?.host || `127.0.0.1:${process.env.PANDA_API_PORT || 8787}`;
+  return `${proto}://${host}`;
+}
+
+function requestUrl(req) {
+  if (req.url?.startsWith("http")) return new URL(req.url);
+  return new URL(req.url || "/", requestOrigin(req));
+}
+
+function redirectAfterFigmaOAuth(res, status, detail = "") {
+  const appUrl = (process.env.PANDA_APP_URL || process.env.PANDA_PUBLIC_BASE_URL || "http://127.0.0.1:5174").replace(/\/$/, "");
+  const location = new URL(appUrl);
+  location.searchParams.set("figma_mcp", status);
+  if (detail) location.searchParams.set("detail", detail.slice(0, 200));
+  res.writeHead(302, { Location: location.toString() });
+  res.end();
 }
 
 function buildHomeTurnFallback(payload) {

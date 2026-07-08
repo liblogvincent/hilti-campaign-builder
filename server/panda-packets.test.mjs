@@ -49,13 +49,13 @@ describe("panda server packets", () => {
     expect(types).toContain("knowledge-promotion-candidates");
   });
 
-  it("builds H2 content planning as a CP1-CP4 bridge package", () => {
+  it("builds H2 content planning as a plain-language bridge package", () => {
     const packet = buildFallback({ phase: "content", campaign_id: "camp_04" });
     const types = packet.artifacts.map((artifact) => artifact.type);
 
     expect(packet.gate.id).toBe("H2");
-    expect(packet.summary).toContain("CP1");
-    expect(packet.summary).toContain("CP4");
+    expect(packet.summary).toContain("creative concept");
+    expect(packet.summary).toContain("Figma mapping");
     expect(types).toContain("cp1-creative-concept");
     expect(types).toContain("cp2-cross-channel-requirements");
     expect(types).toContain("cp3-storyboard-package");
